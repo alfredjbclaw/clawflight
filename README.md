@@ -42,7 +42,7 @@ calendar export (optional adapter) ───────────────
   no model call, and `tick` exits immediately when nobody is within six hours of
   a departure.
 - **Offline-testable.** Pure standard library, zero runtime dependencies, and a
-  380-test suite that runs with no network and no credentials.
+  380+ test suite that runs with no network and no credentials.
 
 ## Quickstart
 
@@ -133,13 +133,28 @@ make gate                      # tests + the PII history scan
 
 Everything in `fixtures/` is synthetic and must stay that way — see
 [fixtures/README.md](fixtures/README.md). `tests/test_no_pii.py` fails the build
-if real personal data appears in the working tree or in git history.
+if third-party personal data appears in the working tree, in git history, or in
+commit metadata. `tests/pii_scan.py` runs the same scan standalone.
 
 ## Status
 
 **Pre-release.** The engine is battle-tested privately; this repository is the
 sanitized public extraction. The API may still move before 1.0.
 
+## Contact
+
+Bug reports and feature requests are best filed as
+[issues](https://github.com/alfredjbclaw/clawflight/issues) — they are public,
+searchable, and someone else has probably hit the same thing.
+
+For anything you would rather not put in public — a security report, or a
+question that would mean pasting a real itinerary — mail
+**alfred.j.berchtold@gmail.com** directly. Please do not paste real
+confirmation emails into an issue: redact the passenger name, confirmation
+code and any loyalty number first, or send a synthetic reproduction instead.
+
+Maintained by Alfred J Berchtold ([@alfredjbclaw](https://github.com/alfredjbclaw)).
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT © 2026 Alfred J Berchtold — see [LICENSE](LICENSE).

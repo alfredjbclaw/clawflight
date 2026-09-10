@@ -6,9 +6,9 @@ codes deliberately use an obviously-fake `FAKEnn` form so they can never be
 mistaken for a real PNR, and all addresses use RFC 2606 reserved domains
 (`example.com`, `*.example`, `*.test`).
 
-`tests/test_no_pii.py` enforces this: it greps the working tree for real-data
-patterns and fails the build on a hit. Never paste a real confirmation email
-into this directory — author a fixture instead.
+`tests/test_no_pii.py` enforces this: it scans the working tree, git history
+and commit metadata for real-data patterns and fails the build on a hit. Never
+paste a real confirmation email into this directory — author a fixture instead.
 
 ## The fictional Kestrel family
 

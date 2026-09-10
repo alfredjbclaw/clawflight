@@ -9,10 +9,11 @@ gate: test history
 	@echo "gate: clean"
 
 pii:
-	python3 -m pytest tests/test_no_pii.py -q
+	./tests/pii_scan.py --worktree
+	./tests/pii_scan.py
 
 history:
-	./tests/history_scan.sh
+	./tests/pii_scan.py
 
 # Drive the CLI end to end against the synthetic fixtures in a scratch dir.
 demo:

@@ -1,99 +1,35 @@
-"""The publication gate: no real personal data anywhere in this repository.
+"""The publication gate: no third-party personal data anywhere in this repo.
 
 clawflight is the sanitized public extraction of a private family tracker whose
-fixtures contained real third-party data. This test is the standing guarantee
-that none of it ever arrives here — by a fresh paste, a helpful "realistic"
-example, or a copied fixture.
+fixtures contained real third-party data. These tests are the standing
+guarantee that none of it ever arrives here — by a fresh paste, a helpful
+"realistic" example, or a copied fixture.
 
-It scans the **working tree**. Run ``tests/history_scan.sh`` to apply the same
-blocklist to every blob in git history before publishing.
+The patterns live in ``pii_blocklist.py`` and the scanning in ``pii_scan.py``,
+shared with the standalone pre-publication tool so the two can never diverge.
+The maintainer's own identity is deliberately published; see
+``MAINTAINER_CONTACTS`` and :func:`test_the_contact_route_is_published`.
 """
 from __future__ import annotations
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import pii_scan  # noqa: E402
+from pii_blocklist import (  # noqa: E402
+    MAINTAINER_CONTACTS,
+    blocklist,
+    without_maintainer,
+)
+
 
 REPO = Path(__file__).resolve().parent.parent
-
-#: Directories that are never source and never publish.
-SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", "venv", ".mypy_cache"}
-
-#: Extensions we never scan as text.
-SKIP_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".pyc"}
-
-
-def _blocklist():
-    """(name, compiled pattern, why it is forbidden).
-
-    Patterns match *shapes of real data*, not the words around them: a fixture
-    may say "SkyMiles" but must never carry a membership number. This list is
-    applied to the working tree AND to every blob in git history.
-    """
-    return [
-        (
-            "private-domains",
-            re.compile(
-                r"\b(?:ledecompany|livenation)\b|berchtold\.org", re.IGNORECASE
-            ),
-            "domains belonging to real people or employers",
-        ),
-        (
-            "institutional-email",
-            re.compile(r"@(?:cornell\.edu|gmail\.com|icloud\.com|outlook\.com|yahoo\.com)\b", re.IGNORECASE),
-            "a real mailbox; fixtures must use example.com or a .example/.test domain",
-        ),
-        (
-            "loyalty-number",
-            re.compile(
-                r"\b(?:skymiles|aadvantage|mileageplus|frequent\s*flyer)\b[^\n]{0,24}?\d{6,}",
-                re.IGNORECASE,
-            ),
-            "a loyalty programme membership number",
-        ),
-        (
-            "eticket-number",
-            re.compile(r"\b(?:e-?ticket|ticket\s*(?:number|#))[^\n]{0,24}?\d{10,}", re.IGNORECASE),
-            "an e-ticket number",
-        ),
-        (
-            "payment-card",
-            re.compile(
-                r"\b(?:amex|american\s+express|visa|mastercard|card)\b[^\n]{0,24}?"
-                r"(?:\*{2,}|x{4,}|ending\s+in\s*)\s*\d{4}\b",
-                re.IGNORECASE,
-            ),
-            "a partial payment card number",
-        ),
-        (
-            "us-phone-number",
-            re.compile(r"(?<![\d.\-])(?:\+1[ .-]?)?\(?[2-9]\d{2}\)?[ .-][2-9]\d{2}[ .-]\d{4}(?![\d.\-])"),
-            "a real-looking phone number; use +1555… only",
-        ),
-        (
-            "home-coordinates",
-            re.compile(r"\bhome_(?:lat|lon|latitude|longitude|address)\b", re.IGNORECASE),
-            "a home location field; drive-home routing is out of scope",
-        ),
-    ]
-
-
-def _scannable_files():
-    for path in sorted(REPO.rglob("*")):
-        if not path.is_file():
-            continue
-        if any(part in SKIP_DIRS for part in path.relative_to(REPO).parts):
-            continue
-        if path.suffix.lower() in SKIP_SUFFIXES:
-            continue
-        if path.name in ("test_no_pii.py", "history_scan.sh"):
-            # The gate and its standalone twin necessarily contain the patterns
-            # they forbid.
-            continue
-        yield path
 
 
 def _read(path: Path) -> str:
@@ -103,17 +39,59 @@ def _read(path: Path) -> str:
         return ""
 
 
-@pytest.mark.parametrize("name,pattern,why", _blocklist(), ids=lambda value: getattr(value, "pattern", value) if not hasattr(value, "pattern") else "re")
-def test_no_real_personal_data_in_the_working_tree(name, pattern, why) -> None:
-    hits = []
-    for path in _scannable_files():
-        for line_number, line in enumerate(_read(path).splitlines(), start=1):
-            if pattern.search(line):
-                hits.append(
-                    "{}:{}: {}".format(path.relative_to(REPO), line_number, line.strip()[:160])
-                )
+def _requires_git():
+    try:
+        pii_scan.publishable_blobs()
+    except pii_scan.ScanError:
+        pytest.skip("not a git repository with history")
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover - no git
+        pytest.skip("git is not available")
 
-    assert not hits, "{} ({}):\n{}".format(name, why, "\n".join(hits))
+
+# --------------------------------------------------------------------------
+# Content
+# --------------------------------------------------------------------------
+
+
+def test_no_third_party_personal_data_in_the_working_tree() -> None:
+    findings, scanned = pii_scan.scan_worktree(strict=False)
+
+    assert scanned > 0, "the scan read no files, so a clean result means nothing"
+    assert not findings, "\n".join(findings)
+
+
+def test_no_third_party_personal_data_in_publishable_history() -> None:
+    _requires_git()
+
+    findings, scanned = pii_scan.scan_history(strict=False)
+
+    assert scanned > 0, "the scan read no blobs, so a clean result means nothing"
+    assert not findings, "\n".join(findings)
+
+
+def test_git_commit_metadata_carries_no_third_party_identity() -> None:
+    """Author and committer identity is part of what a public repo publishes.
+
+    Content scanners cannot see it: ``git grep`` searches blobs. The
+    maintainer's own identity is allowed; a co-author's or family member's real
+    mailbox arriving through a stray ``user.email`` is not.
+    """
+    _requires_git()
+
+    findings = pii_scan.scan_commit_metadata(strict=False)
+
+    assert not findings, (
+        "\n".join(findings)
+        + "\n\nCommit metadata is published with the code. Use the maintainer\n"
+        "identity, or a GitHub noreply address:\n"
+        "  git config user.email '<id>+<handle>@users.noreply.github.com'\n"
+        "Existing commits need a history rewrite to change."
+    )
+
+
+# --------------------------------------------------------------------------
+# Fixture hygiene
+# --------------------------------------------------------------------------
 
 
 def test_every_fixture_address_uses_a_reserved_domain() -> None:
@@ -163,25 +141,6 @@ def test_confirmation_codes_in_fixtures_are_obviously_synthetic() -> None:
     assert not offenders, "non-synthetic confirmation codes:\n" + "\n".join(offenders)
 
 
-def test_no_owner_surname_in_the_working_tree() -> None:
-    """Defence in depth beyond the third-party blocklist.
-
-    The owner's own surname is not third-party PII, but a public repository has
-    no reason to carry it either: its presence is a reliable signal that
-    something was pasted from the private original rather than authored here.
-    Scoped to the working tree — see ``tests/history_scan.sh`` for history.
-    """
-    pattern = re.compile(r"berchtold", re.IGNORECASE)
-    hits = [
-        "{}:{}".format(path.relative_to(REPO), line_number)
-        for path in _scannable_files()
-        for line_number, line in enumerate(_read(path).splitlines(), start=1)
-        if pattern.search(line)
-    ]
-
-    assert hits == [], "owner surname found in:\n" + "\n".join(hits)
-
-
 def test_no_module_imports_the_private_package() -> None:
     # The private engine's package name. Prose in EXTRACTION-PLAN.md may name
     # the source project; shipped code may never import from it.
@@ -206,120 +165,160 @@ def test_no_credential_value_is_committed() -> None:
         r"(?i)\b(?:password|passwd|secret|api[_-]?key|token|bearer)\b\s*[:=]\s*"
         r"[\"']([^\"'\n]{8,})[\"']"
     )
-    allowed = re.compile(r"(?i)_ENV$|^CLAWFLIGHT_|not-a-real-|expected-secret|gate-secret|^\$")
+    allowed = re.compile(
+        r"(?i)_ENV$|^CLAWFLIGHT_|not-a-real-|expected-secret|gate-secret|^\$"
+    )
     offenders = []
 
-    for path in _scannable_files():
+    for path in pii_scan.worktree_files():
         if path.suffix not in (".py", ".json", ".md", ".sh", ".toml", ".cfg"):
             continue
         for line_number, line in enumerate(_read(path).splitlines(), start=1):
             match = assignment.search(line)
             if match and not allowed.search(match.group(1)):
                 offenders.append(
-                    "{}:{}: {}".format(path.relative_to(REPO), line_number, line.strip()[:120])
+                    "{}:{}: {}".format(
+                        path.relative_to(REPO), line_number, line.strip()[:120]
+                    )
                 )
 
     assert not offenders, "possible committed credential:\n" + "\n".join(offenders)
 
 
-def test_the_history_scan_script_is_present_and_executable() -> None:
-    # The working-tree gate cannot see history; the script is how a maintainer
-    # checks the rest before publishing.
-    script = REPO / "tests" / "history_scan.sh"
-
-    assert script.exists()
-    assert script.stat().st_mode & 0o111, "history_scan.sh must be executable"
+# --------------------------------------------------------------------------
+# The maintainer allowance
+# --------------------------------------------------------------------------
 
 
-def _commits():
-    """Every commit a push would publish, or a skip when git is unavailable.
+def test_the_contact_route_is_published() -> None:
+    """A public project needs somewhere to send a bug report.
 
-    ``--branches --tags`` rather than ``--all`` on purpose. It covers exactly
-    what publishing exposes: local branches and tags. It deliberately excludes
-    remote-tracking refs, whose contents belong to the remote rather than to
-    this working copy, and ``refs/original/*`` left behind by a history rewrite
-    — those must be deleted, not scanned, and the rewrite is not complete until
-    they are.
+    The maintainer's name and address are deliberately published, so this is a
+    presence check rather than an absence one: if a future scrub removes the
+    only way to reach a human, that is a regression.
     """
-    try:
-        revisions = subprocess.run(
-            ["git", "rev-list", "--branches", "--tags"],
-            cwd=str(REPO),
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):  # pragma: no cover - no git
-        pytest.skip("git is not available")
-    if revisions.returncode != 0 or not revisions.stdout.strip():
-        pytest.skip("not a git repository with history")
-    return revisions.stdout.split()
+    assert "Alfred J Berchtold" in _read(REPO / "LICENSE"), (
+        "LICENSE must name a copyright holder"
+    )
+    assert any(
+        contact in _read(REPO / "README.md") for contact in MAINTAINER_CONTACTS
+    ), "README must carry a contact route"
+    assert "alfred.j.berchtold@gmail.com" in _read(REPO / "pyproject.toml"), (
+        "package metadata must carry a maintainer address"
+    )
 
 
-def test_git_commit_metadata_carries_no_personal_identity() -> None:
-    """Author and committer identity is part of what a public repo publishes.
+def test_the_maintainer_allowance_is_narrow() -> None:
+    """Allowing one address must not allow the whole provider."""
+    email = dict((rule.name, rule.pattern) for rule in blocklist())[
+        "institutional-email"
+    ]
 
-    ``git grep`` searches blob *contents* only, so a name or a personal address
-    in commit metadata slips past every content scan. On a repository extracted
-    for publication that is exactly the thing to catch: the default
-    ``user.email`` on a personal machine is usually a real mailbox.
+    assert not email.search(without_maintainer("alfred.j.berchtold@gmail.com"))
+    assert email.search(without_maintainer("someone.else@gmail.com"))
+    assert email.search(without_maintainer("a.relative@icloud.com"))
+    # Strict mode withdraws the allowance entirely.
+    assert email.search(without_maintainer("alfred.j.berchtold@gmail.com", strict=True))
+
+
+# --------------------------------------------------------------------------
+# The scanner itself
+# --------------------------------------------------------------------------
+
+
+def test_every_rule_matches_something_it_is_meant_to_catch() -> None:
+    """A rule that cannot match is a rule that is not protecting anything.
+
+    This exists because a previous shell implementation used ``git grep -E``,
+    whose POSIX ERE has no ``\\b``. Several patterns silently matched nothing,
+    and every scan reported clean.
     """
-    _commits()
-    identities = subprocess.run(
-        ["git", "log", "--branches", "--tags", "--format=%an <%ae>%n%cn <%ce>"],
+    samples = {
+        "private-domains": "see notes at team.ledecompany.com",
+        "institutional-email": "reply to a.person@cornell.edu please",
+        "loyalty-number": "SkyMiles #1234567 on file",
+        "eticket-number": "e-ticket number 0062345678901",
+        "payment-card": "Amex ending in 1009",
+        "us-phone-number": "call 415 555 0142",
+        "home-coordinates": "home_address = '...'",
+        "maintainer-identity": "maintained by Alfred J Berchtold",
+    }
+    unmatched = []
+    for rule in blocklist(strict=True):
+        sample = samples.get(rule.name)
+        if sample is None or not rule.pattern.search(sample):
+            unmatched.append("{}: did not match {!r}".format(rule.name, sample))
+
+    assert not unmatched, "\n".join(unmatched)
+
+
+def _run_scan(*arguments):
+    return subprocess.run(
+        [sys.executable, str(REPO / "tests" / "pii_scan.py"), *arguments],
         cwd=str(REPO),
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=300,
         check=False,
     )
-    offenders = []
-    surname = re.compile(r"berchtold", re.IGNORECASE)
-    for identity in sorted(set(identities.stdout.splitlines())):
-        if not identity.strip():
-            continue
-        if surname.search(identity):
-            offenders.append("{}  (personal name)".format(identity))
-            continue
-        for _name, pattern, _why in _blocklist():
-            if pattern.search(identity):
-                offenders.append("{}  (blocked pattern)".format(identity))
-                break
 
-    assert not offenders, (
-        "personal identity in commit metadata:\n"
-        + "\n".join(offenders)
-        + "\n\nUse a GitHub noreply address, e.g.\n"
-        "  git config user.email '<id>+<handle>@users.noreply.github.com'\n"
-        "Existing commits need a history rewrite to change."
+
+def test_the_scanner_detects_a_planted_pattern() -> None:
+    """A scanner that cannot fail is a scanner that cannot pass."""
+    planted = REPO / "planted_for_scan_test.txt"
+    assert not planted.exists()
+    planted.write_text("contact: someone.else@gmail.com\n", encoding="utf-8")
+    try:
+        result = _run_scan("--worktree")
+    finally:
+        planted.unlink()
+
+    assert result.returncode == 1, (
+        "the scanner did not report a planted third-party address\n"
+        + result.stdout
+        + result.stderr
+    )
+    assert "someone.else@gmail.com" in result.stdout
+
+
+def test_the_scanner_reports_a_clean_repository() -> None:
+    worktree = _run_scan("--worktree")
+    history = _run_scan()
+
+    assert worktree.returncode == 0, worktree.stdout + worktree.stderr
+    assert history.returncode == 0, history.stdout + history.stderr
+    assert "clean:" in worktree.stdout and "clean:" in history.stdout
+    # And it says how much it read, so a no-op cannot look like a pass.
+    assert "scanned 0 " not in worktree.stdout
+    assert "scanned 0 " not in history.stdout
+
+
+def test_the_scanner_does_not_flag_the_maintainer() -> None:
+    # LICENSE, README and pyproject carry the maintainer's identity on purpose.
+    result = _run_scan("--worktree")
+
+    assert result.returncode == 0
+    assert "alfred.j.berchtold@gmail.com" not in result.stdout
+
+
+def test_strict_mode_flags_the_maintainer_identity() -> None:
+    # The setting for a fork that wants no personal identity at all.
+    result = _run_scan("--worktree", "--strict")
+
+    assert result.returncode == 1
+    assert "maintainer-identity" in result.stdout
+
+
+def test_the_shell_shim_still_works() -> None:
+    # docs/, the Makefile and muscle memory all name history_scan.sh.
+    result = subprocess.run(
+        [str(REPO / "tests" / "history_scan.sh"), "--worktree"],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
     )
 
-
-def test_git_history_carries_no_blocked_pattern() -> None:
-    """Apply the same blocklist to every blob reachable from any ref.
-
-    Skipped when git is unavailable or this is not a repository, so the suite
-    still runs from a source tarball.
-    """
-    commits = _commits()
-    failures = []
-    for name, pattern, why in _blocklist():
-        found = subprocess.run(
-            ["git", "grep", "-I", "-i", "-n", "-E", pattern.pattern] + commits,
-            cwd=str(REPO),
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False,
-        )
-        # git grep exits 1 with no output when nothing matched.
-        lines = [
-            line
-            for line in found.stdout.splitlines()
-            if ":tests/test_no_pii.py:" not in line
-        ]
-        if lines:
-            failures.append("{} ({}):\n{}".format(name, why, "\n".join(lines[:20])))
-
-    assert not failures, "blocked patterns found in git history:\n" + "\n\n".join(failures)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "clean:" in result.stdout

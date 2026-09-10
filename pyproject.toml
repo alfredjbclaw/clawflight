@@ -9,6 +9,12 @@ description = "Family flight alerts in your group chat, powered by a forwarding 
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+authors = [
+  { name = "Alfred J Berchtold", email = "alfred.j.berchtold@gmail.com" },
+]
+maintainers = [
+  { name = "Alfred J Berchtold", email = "alfred.j.berchtold@gmail.com" },
+]
 keywords = ["flight", "tracking", "adsb", "openclaw", "notifications"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -25,6 +31,10 @@ classifiers = [
 # them becomes an install and audit burden for a package people run on a
 # household machine.
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/alfredjbclaw/clawflight"
+Issues = "https://github.com/alfredjbclaw/clawflight/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]

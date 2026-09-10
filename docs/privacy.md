@@ -89,8 +89,26 @@ Removing one flight: `clawflight status` for the id, then delete its entry from
 
 `fixtures/` is entirely synthetic and must stay that way. Never paste a real
 confirmation email into this repository — author a fixture instead.
-`tests/test_no_pii.py` scans the working tree and git history on every run;
-`tests/history_scan.sh` is the standalone form to run before publishing.
+`tests/test_no_pii.py` scans the working tree, every blob in publishable git
+history, and commit author/committer identity on every run.
+`tests/pii_scan.py` is the same scan as a standalone tool to run before
+publishing (`tests/history_scan.sh` is a shim over it):
+
+```sh
+tests/pii_scan.py --worktree   # the working tree only
+tests/pii_scan.py              # all publishable history
+tests/pii_scan.py --strict     # also flag the maintainer's own identity
+```
+
+Both share one pattern list, in `tests/pii_blocklist.py`. They used to keep
+separate copies and the shell one was quietly weaker — `git grep -E` implements
+POSIX ERE, which has no `\b`, so several patterns had never matched anything.
+`test_every_rule_matches_something_it_is_meant_to_catch` now proves each rule
+still fires.
+
+The maintainer's own name and address are deliberately published so that people
+can report bugs; the scan allows exactly those two strings and nothing else at
+the same providers.
 
 Commit metadata is published too, and a personal machine's default
 `user.email` is usually a real mailbox. This repository pins a repo-local
