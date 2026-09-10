@@ -232,10 +232,18 @@ def test_the_history_scan_script_is_present_and_executable() -> None:
 
 
 def _commits():
-    """Every commit reachable from any ref, or a skip when git is unavailable."""
+    """Every commit a push would publish, or a skip when git is unavailable.
+
+    ``--branches --tags`` rather than ``--all`` on purpose. It covers exactly
+    what publishing exposes: local branches and tags. It deliberately excludes
+    remote-tracking refs, whose contents belong to the remote rather than to
+    this working copy, and ``refs/original/*`` left behind by a history rewrite
+    — those must be deleted, not scanned, and the rewrite is not complete until
+    they are.
+    """
     try:
         revisions = subprocess.run(
-            ["git", "rev-list", "--all"],
+            ["git", "rev-list", "--branches", "--tags"],
             cwd=str(REPO),
             capture_output=True,
             text=True,
@@ -259,7 +267,7 @@ def test_git_commit_metadata_carries_no_personal_identity() -> None:
     """
     _commits()
     identities = subprocess.run(
-        ["git", "log", "--all", "--format=%an <%ae>%n%cn <%ce>"],
+        ["git", "log", "--branches", "--tags", "--format=%an <%ae>%n%cn <%ce>"],
         cwd=str(REPO),
         capture_output=True,
         text=True,

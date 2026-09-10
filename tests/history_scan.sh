@@ -42,9 +42,12 @@ if [[ ${worktree_only} -eq 1 ]]; then
   label='working tree'
   SEARCH=(--untracked)
 else
-  label='all git history'
+  label='all publishable history'
+  # Branches and tags only: what a push actually exposes. Remote-tracking refs
+  # belong to the remote, and refs/original/* from a rewrite must be deleted
+  # rather than scanned.
   # shellcheck disable=SC2207
-  SEARCH=($(git rev-list --all))
+  SEARCH=($(git rev-list --branches --tags))
   if [[ ${#SEARCH[@]} -eq 0 ]]; then
     echo 'no commits to scan'
     exit 0
