@@ -142,4 +142,4 @@ sanitized public extraction. The API may still move before 1.0.
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

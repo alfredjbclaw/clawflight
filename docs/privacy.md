@@ -91,3 +91,15 @@ Removing one flight: `clawflight status` for the id, then delete its entry from
 confirmation email into this repository — author a fixture instead.
 `tests/test_no_pii.py` scans the working tree and git history on every run;
 `tests/history_scan.sh` is the standalone form to run before publishing.
+
+Commit metadata is published too, and a personal machine's default
+`user.email` is usually a real mailbox. This repository pins a repo-local
+identity so your global git config cannot leak into it:
+
+```sh
+git config user.name  '<your-handle>'
+git config user.email '<id>+<your-handle>@users.noreply.github.com'
+```
+
+`test_git_commit_metadata_carries_no_personal_identity` enforces it. Existing
+commits cannot be fixed by config alone — they need a history rewrite.

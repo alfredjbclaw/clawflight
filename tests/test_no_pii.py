@@ -231,12 +231,8 @@ def test_the_history_scan_script_is_present_and_executable() -> None:
     assert script.stat().st_mode & 0o111, "history_scan.sh must be executable"
 
 
-def test_git_history_carries_no_blocked_pattern() -> None:
-    """Apply the same blocklist to every blob reachable from any ref.
-
-    Skipped when git is unavailable or this is not a repository, so the suite
-    still runs from a source tarball.
-    """
+def _commits():
+    """Every commit reachable from any ref, or a skip when git is unavailable."""
     try:
         revisions = subprocess.run(
             ["git", "rev-list", "--all"],
@@ -250,8 +246,55 @@ def test_git_history_carries_no_blocked_pattern() -> None:
         pytest.skip("git is not available")
     if revisions.returncode != 0 or not revisions.stdout.strip():
         pytest.skip("not a git repository with history")
+    return revisions.stdout.split()
 
-    commits = revisions.stdout.split()
+
+def test_git_commit_metadata_carries_no_personal_identity() -> None:
+    """Author and committer identity is part of what a public repo publishes.
+
+    ``git grep`` searches blob *contents* only, so a name or a personal address
+    in commit metadata slips past every content scan. On a repository extracted
+    for publication that is exactly the thing to catch: the default
+    ``user.email`` on a personal machine is usually a real mailbox.
+    """
+    _commits()
+    identities = subprocess.run(
+        ["git", "log", "--all", "--format=%an <%ae>%n%cn <%ce>"],
+        cwd=str(REPO),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    offenders = []
+    surname = re.compile(r"berchtold", re.IGNORECASE)
+    for identity in sorted(set(identities.stdout.splitlines())):
+        if not identity.strip():
+            continue
+        if surname.search(identity):
+            offenders.append("{}  (personal name)".format(identity))
+            continue
+        for _name, pattern, _why in _blocklist():
+            if pattern.search(identity):
+                offenders.append("{}  (blocked pattern)".format(identity))
+                break
+
+    assert not offenders, (
+        "personal identity in commit metadata:\n"
+        + "\n".join(offenders)
+        + "\n\nUse a GitHub noreply address, e.g.\n"
+        "  git config user.email '<id>+<handle>@users.noreply.github.com'\n"
+        "Existing commits need a history rewrite to change."
+    )
+
+
+def test_git_history_carries_no_blocked_pattern() -> None:
+    """Apply the same blocklist to every blob reachable from any ref.
+
+    Skipped when git is unavailable or this is not a repository, so the suite
+    still runs from a source tarball.
+    """
+    commits = _commits()
     failures = []
     for name, pattern, why in _blocklist():
         found = subprocess.run(

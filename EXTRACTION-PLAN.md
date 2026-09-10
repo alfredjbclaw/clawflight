@@ -287,9 +287,13 @@ metadata per plugins/sdk-setup.md:68-83) and gateway-restart install UX.
 ## 10. Open decisions for Jacob
 
 1. **Name** — `clawflight` (recommended) or alternative.
-2. **License** — MIT (recommended for max adoption) or Apache-2.0 (patent grant).
+2. ~~**License**~~ — **DECIDED: MIT.** Copyright is held as "the clawflight
+   authors" rather than a legal name, so no personal name enters the public
+   repository. Substitute a legal name if you would rather hold it personally.
 3. **Delta My Trips** — omit from v1 entirely (recommended) vs ship-disabled stub.
-4. **Publish owner** — personal ClawHub handle vs a dedicated org owner.
+4. ~~**Publish owner**~~ — **DECIDED: both handles**, `@alfredjbclaw` and
+   `@helooo789`. Neither ClawHub account is logged in yet (`clawhub login`), so
+   the slug is not reserved.
 5. **Fictional-family naming** in fixtures ("Kestrel" placeholder — any preference).
 6. **v2 plugin commitment** — whether the TS push-ingress plugin is on the roadmap
    (affects how loudly docs promise push mode ergonomics).

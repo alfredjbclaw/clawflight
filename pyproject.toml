@@ -8,10 +8,11 @@ version = "0.1.0"
 description = "Family flight alerts in your group chat, powered by a forwarding address."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { file = "LICENSE" }
+license = { text = "MIT" }
 keywords = ["flight", "tracking", "adsb", "openclaw", "notifications"]
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
   "Intended Audience :: End Users/Desktop",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
