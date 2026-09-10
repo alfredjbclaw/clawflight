@@ -1,0 +1,36 @@
+{
+  "flights": [
+    {
+      "number": "AA4912",
+      "status": "Scheduled",
+      "departure": {
+        "scheduledTime": {"local": "2026-07-11T12:51:00-06:00"},
+        "terminal": "B",
+        "gate": "B12"
+      },
+      "arrival": {
+        "scheduledTime": {"local": "2026-07-11T16:10:00-05:00"},
+        "terminal": "C",
+        "gate": "C4"
+      }
+    },
+    {
+      "number": "AA1203",
+      "status": "Delayed",
+      "departure": {
+        "scheduledTime": {"local": "2026-07-11T17:39:00-05:00"},
+        "revisedTime": {"local": "2026-07-11T18:07:00-05:00"}
+      },
+      "arrival": {
+        "scheduledTime": {"local": "2026-07-11T22:30:00-04:00"},
+        "revisedTime": {"local": "2026-07-11T23:00:00-04:00"}
+      }
+    },
+    {
+      "number": "DL4133",
+      "status": "Cancelled",
+      "departure": {},
+      "arrival": {}
+    }
+  ]
+}

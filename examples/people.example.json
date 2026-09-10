@@ -1,0 +1,49 @@
+{
+  "//": "A standalone attribution table. Paste the `people` array into clawflight.json.",
+
+  "people": [
+    {
+      "key": "alex",
+      "display": "Alex",
+
+      "//match_substrings": [
+        "Matched case-insensitively against a passenger or traveler name as the",
+        "airline prints it. List every spelling that appears on a real ticket:",
+        "airlines are inconsistent about middle names and initials, and a name",
+        "that does not match here attributes the flight to 'unknown' rather than",
+        "to the wrong person."
+      ],
+      "match_substrings": [
+        "alex kestrel",
+        "alexandra kestrel",
+        "alexandra morgan kestrel"
+      ],
+
+      "//match_email_localparts": [
+        "Matched against calendar attendee addresses. The part before @ must",
+        "match EXACTLY once . - _ + are stripped from both sides, so 'a.kestrel'",
+        "also matches 'akestrel@' and 'a-kestrel@' but never 'alexis@'."
+      ],
+      "match_email_localparts": ["alex", "alex.kestrel", "a.kestrel"]
+    },
+    {
+      "key": "sam",
+      "display": "Sam",
+      "match_substrings": ["sam kestrel", "samuel kestrel", "samuel t kestrel"],
+      "match_email_localparts": ["sam", "sam.kestrel"]
+    },
+    {
+      "key": "robin",
+      "display": "Robin",
+      "match_substrings": ["robin kestrel", "robin j kestrel"],
+      "match_email_localparts": ["robin", "robin.kestrel"],
+
+      "//possessive_aliases": [
+        "Extra words a calendar title may use possessively. The key, each",
+        "first name, and the display name already work, so 'Robin's flight'",
+        "needs nothing; this adds 'Parent's flight home'."
+      ],
+      "possessive_aliases": ["parent"]
+    }
+  ]
+}

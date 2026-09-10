@@ -1,0 +1,43 @@
+From: Delta Air Lines <confirmation@notify.delta.example>
+To: family-flights@example.com
+Subject: Your flight receipt and itinerary
+
+SYNTHETIC FIXTURE — every name, code and booking below is invented.
+
+** Confirmation Number ** FAKEA1
+
+** Passenger Info **
+Name: ROBIN J KESTREL
+
+** MON, 11MAY**DEPART**ARRIVE**
+
+DELTA 667
+
+NYC-KENNEDY
+6:00 AM SAN FRANCISCO
+9:35 AM
+
+DELTA 667
+
+NYC-KENNEDY
+6:00 AM SAN FRANCISCO
+9:35 AM
+
+** THU, 14MAY**DEPART**ARRIVE**
+
+DELTA 1226
+
+SAN JOSE
+7:10 AM LOS ANGELES
+8:25 AM
+
+** SEATS **
+
+DELTA 667 12A
+DELTA 1226 8C
+
+** FARE RULES **
+
+You are all set. If your plans change you may adjust or cancel this itinerary
+online. Failure to appear for any flight without notice will result in
+cancellation of the remaining reservation.

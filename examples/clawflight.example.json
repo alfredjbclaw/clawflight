@@ -1,0 +1,114 @@
+{
+  // Every value below is an example. Copy this file to
+  // ~/.openclaw/clawflight/clawflight.json and edit it.
+  //
+  // Comments and trailing commas are tolerated. Secrets are NEVER stored here:
+  // only the NAME of the environment variable that holds them.
+
+  // Person key that receives flights we could not attribute to anyone, and the
+  // only person who gets the early T-48 consent prompt. Must be one of `people`.
+  "owner": "alex",
+
+  // The attribution table. Empty means every flight is "unknown".
+  //   match_substrings       matched against a passenger/traveler name
+  //   match_email_localparts matched against calendar attendee addresses,
+  //                          exactly, after . - _ + are stripped
+  //   possessive_aliases     extra words a calendar title may use possessively;
+  //                          the key, each first name, and the display name
+  //                          already work ("Alex's flight", "alex's flight")
+  "people": [
+    {
+      "key": "alex",
+      "display": "Alex",
+      "match_substrings": ["alex kestrel", "alexandra morgan kestrel"],
+      "match_email_localparts": ["alex", "alex.kestrel"]
+    },
+    {
+      "key": "sam",
+      "display": "Sam",
+      "match_substrings": ["sam kestrel", "samuel t kestrel"],
+      "match_email_localparts": ["sam", "sam.kestrel"]
+    },
+    {
+      "key": "robin",
+      "display": "Robin",
+      "match_substrings": ["robin kestrel"],
+      "match_email_localparts": ["robin", "robin.kestrel"],
+      "possessive_aliases": ["parent"]
+    }
+  ],
+
+  // Who receives alerts, and where. `channel.to` is anything
+  // `openclaw message send --channel X --target Y` accepts, so any OpenClaw
+  // channel works: telegram, imessage, whatsapp, discord, slack, signal, …
+  //
+  //   follow_all       receive every flight for everybody
+  //   auto_follow_own  receive your own flights (default true)
+  // Anyone can additionally follow or mute one flight at a time:
+  //   clawflight follow DL767-2026-07-16 --recipient sam
+  "recipients": [
+    {
+      "key": "alex",
+      "name": "Alex",
+      "active": true,
+      "follow_all": true,
+      "channel": { "channel": "telegram", "to": "-1001234567890:topic:42" }
+    },
+    {
+      "key": "sam",
+      "name": "Sam",
+      "active": true,
+      "auto_follow_own": true,
+      "channel": { "channel": "whatsapp", "to": "+15551234567" }
+    },
+    {
+      "key": "robin",
+      "name": "Robin",
+      "active": true,
+      "channel": { "channel": "imessage", "to": "+15551234568" }
+    }
+  ],
+
+  // Where confirmation email arrives.
+  //   "imap" polls a forwarding address (the normal setup)
+  //   "mbox" reads a local mbox file or a folder of .eml files (offline)
+  //   "none" disables ingestion; supply itineraries another way
+  //
+  // trusted_senders is an allow-list of exact addresses and base domains. A
+  // base domain matches itself and true subdomains only, so "delta.com" never
+  // matches "delta.com.phish.example". Nothing outside it is ever parsed.
+  "mailbox": {
+    "adapter": "imap",
+    "host": "imap.gmail.com",
+    "port": 993,
+    "ssl": true,
+    "username": "family-flights@example.com",
+    "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
+    "folder": "INBOX",
+    "trusted_senders": [
+      "delta.com",
+      "aa.com",
+      "united.com",
+      "jetblue.com",
+      "alaskaair.com",
+      "southwest.com"
+    ],
+    "poll_trusted_senders_only": true
+  },
+
+  // OPTIONAL push upgrade. Leave disabled for the zero-signup default: keyless
+  // public feeds only. Enabling this needs a RapidAPI key and public ingress to
+  // the loopback receiver — see docs/push-upgrade.md.
+  "push": {
+    "enabled": false,
+    "rapidapi_key_env": "CLAWFLIGHT_RAPIDAPI_KEY",
+    "webhook_url": "",
+    "webhook_secret_env": "CLAWFLIGHT_WEBHOOK_SECRET",
+    "receiver_port": 8787
+  },
+
+  // How far ahead to watch, and where state lives (files are created 0600 in a
+  // 0700 directory).
+  "horizon_days": 3,
+  "state_dir": "~/.openclaw/clawflight"
+}

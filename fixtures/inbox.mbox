@@ -1,0 +1,72 @@
+From confirmations@air.example Sat Jul 11 09:14:02 2026
+Message-ID: <trip-1001@air.example>
+From: Air Example Reservations <confirmations@air.example>
+To: family-flights@example.com
+Subject: Your itinerary is confirmed
+Date: Sat, 11 Jul 2026 09:14:02 +0000
+Content-Type: text/plain; charset="utf-8"
+
+SYNTHETIC FIXTURE — invented traveler, route and confirmation code.
+
+Your itinerary is confirmed.
+
+Confirmation Code: FAKE20
+Traveler: ALEXANDRA MORGAN KESTREL
+
+Flight: DL 248
+Date: 2026-08-19
+From: JFK
+To: LAX
+
+Manage this booking in the app. Bag drop closes 45 minutes before departure.
+
+From confirmations@air.example Sun Jul 12 11:02:44 2026
+Message-ID: <trip-1002@air.example>
+From: Air Example Reservations <confirmations@air.example>
+To: family-flights@example.com
+Subject: Two-leg itinerary confirmed
+Date: Sun, 12 Jul 2026 11:02:44 +0000
+Content-Type: text/plain; charset="utf-8"
+
+SYNTHETIC FIXTURE — invented traveler, route and confirmation code.
+
+Booking Reference: FAKE21
+Passenger: SAMUEL T KESTREL
+
+Flight Number: UA 410
+Departure Date: August 21, 2026
+Route: EWR -> ORD
+
+Flight Number: UA 882
+Departure Date: August 21, 2026
+Origin: ORD
+Destination: SFO
+
+From deals@marketing.example Sun Jul 12 12:00:00 2026
+Message-ID: <promo-77@marketing.example>
+From: Example Fares <deals@marketing.example>
+To: family-flights@example.com
+Subject: Weekend fares from JFK
+Date: Sun, 12 Jul 2026 12:00:00 +0000
+Content-Type: text/plain; charset="utf-8"
+
+Save on your next trip from JFK to LAX with promo code SPECIAL. This message
+carries no itinerary and comes from an untrusted sender.
+
+From lookalike@air.example.evil.test Sun Jul 12 13:30:00 2026
+Message-ID: <spoof-9@air.example.evil.test>
+From: "Air Example Reservations" <lookalike@air.example.evil.test>
+To: family-flights@example.com
+Subject: Your itinerary is confirmed
+Date: Sun, 12 Jul 2026 13:30:00 +0000
+Content-Type: text/plain; charset="utf-8"
+
+Confirmation Code: FAKE22
+Traveler: ALEXANDRA MORGAN KESTREL
+
+Flight: DL 999
+Date: 2026-08-19
+From: JFK
+To: LAX
+
+This sender is a lookalike subdomain and must never be trusted.

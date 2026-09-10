@@ -1,0 +1,127 @@
+iata,name,lat,lon,tz
+ABQ,Albuquerque International Sunport,35.0402,-106.6091,America/Denver
+AKL,Auckland,-37.0082,174.7850,Pacific/Auckland
+ALB,Albany International,42.7483,-73.8017,America/New_York
+AMS,Amsterdam Schiphol,52.3105,4.7683,Europe/Amsterdam
+ANC,Ted Stevens Anchorage International,61.1743,-149.9962,America/Anchorage
+ASE,Aspen-Pitkin County,39.2232,-106.8688,America/Denver
+ATL,Hartsfield-Jackson Atlanta International,33.6367,-84.4281,America/New_York
+AUS,Austin-Bergstrom International,30.1975,-97.6664,America/Chicago
+BCN,Barcelona El Prat,41.2974,2.0833,Europe/Madrid
+BDL,Bradley International,41.9389,-72.6832,America/New_York
+BNA,Nashville International,36.1263,-86.6774,America/Chicago
+BOI,Boise Air Terminal,43.5644,-116.2228,America/Boise
+BOS,Boston Logan International,42.3656,-71.0096,America/New_York
+BRU,Brussels,50.9014,4.4844,Europe/Brussels
+BUF,Buffalo Niagara International,42.9405,-78.7322,America/New_York
+BUR,Hollywood Burbank,34.2007,-118.3590,America/Los_Angeles
+BWI,Baltimore/Washington International,39.1754,-76.6683,America/New_York
+BZN,Bozeman Yellowstone International,45.7776,-111.1530,America/Denver
+CAI,Cairo International,30.1219,31.4056,Africa/Cairo
+CDG,Paris Charles de Gaulle,49.0097,2.5479,Europe/Paris
+CHS,Charleston International,32.8986,-80.0405,America/New_York
+CLE,Cleveland Hopkins International,41.4117,-81.8498,America/New_York
+CLT,Charlotte Douglas International,35.2140,-80.9431,America/New_York
+CMH,John Glenn Columbus International,39.9980,-82.8919,America/New_York
+COS,Colorado Springs,38.8058,-104.7008,America/Denver
+CPH,Copenhagen Kastrup,55.6180,12.6508,Europe/Copenhagen
+CVG,Cincinnati/Northern Kentucky International,39.0489,-84.6678,America/New_York
+DCA,Ronald Reagan Washington National,38.8512,-77.0402,America/New_York
+DEN,Denver International,39.8561,-104.6737,America/Denver
+DFW,Dallas/Fort Worth International,32.8998,-97.0403,America/Chicago
+DOH,Hamad International,25.2731,51.6081,Asia/Qatar
+DSM,Des Moines International,41.5340,-93.6631,America/Chicago
+DTW,Detroit Metropolitan Wayne County,42.2124,-83.3534,America/New_York
+DUB,Dublin,53.4213,-6.2701,Europe/Dublin
+DXB,Dubai International,25.2532,55.3657,Asia/Dubai
+EGE,Eagle County Regional,39.6426,-106.9177,America/Denver
+ELP,El Paso International,31.8072,-106.3781,America/Denver
+EUG,Eugene Airport,44.1246,-123.2119,America/Los_Angeles
+EWR,Newark Liberty International,40.6895,-74.1745,America/New_York
+EZE,Buenos Aires Ezeiza,-34.8222,-58.5358,America/Argentina/Buenos_Aires
+FCO,Rome Fiumicino,41.8003,12.2389,Europe/Rome
+FLL,Fort Lauderdale-Hollywood International,26.0742,-80.1506,America/New_York
+FRA,Frankfurt am Main,50.0379,8.5622,Europe/Berlin
+GEG,Spokane International,47.6199,-117.5338,America/Los_Angeles
+GRU,Sao Paulo Guarulhos,-23.4356,-46.4731,America/Sao_Paulo
+GSO,Piedmont Triad International,36.0977,-79.9373,America/New_York
+HEL,Helsinki Vantaa,60.3172,24.9633,Europe/Helsinki
+HKG,Hong Kong International,22.3080,113.9185,Asia/Hong_Kong
+HND,Tokyo Haneda,35.5494,139.7798,Asia/Tokyo
+HNL,Daniel K. Inouye International,21.3187,-157.9224,Pacific/Honolulu
+IAD,Washington Dulles International,38.9531,-77.4565,America/New_York
+IAH,George Bush Intercontinental,29.9902,-95.3368,America/Chicago
+ICN,Seoul Incheon International,37.4602,126.4407,Asia/Seoul
+IND,Indianapolis International,39.7169,-86.2956,America/Indiana/Indianapolis
+ITH,Ithaca Tompkins International,42.4910,-76.4584,America/New_York
+IST,Istanbul Airport,41.2753,28.7519,Europe/Istanbul
+JAC,Jackson Hole,43.6073,-110.7377,America/Denver
+JAX,Jacksonville International,30.4941,-81.6879,America/New_York
+JFK,New York John F. Kennedy International,40.6413,-73.7781,America/New_York
+JNB,Johannesburg O. R. Tambo,-26.1367,28.2411,Africa/Johannesburg
+KEF,Keflavik International,63.9850,-22.6056,Atlantic/Reykjavik
+LAS,Harry Reid International,36.0840,-115.1537,America/Los_Angeles
+LAX,Los Angeles International,33.9416,-118.4085,America/Los_Angeles
+LGA,New York LaGuardia,40.7769,-73.8740,America/New_York
+LGW,London Gatwick,51.1537,-0.1821,Europe/London
+LHR,London Heathrow,51.4700,-0.4543,Europe/London
+LIM,Lima Jorge Chavez,-12.0219,-77.1143,America/Lima
+LIS,Lisbon Humberto Delgado,38.7756,-9.1354,Europe/Lisbon
+MAD,Madrid Barajas,40.4719,-3.5626,Europe/Madrid
+MCI,Kansas City International,39.2976,-94.7139,America/Chicago
+MCO,Orlando International,28.4312,-81.3081,America/New_York
+MEL,Melbourne Tullamarine,-37.6690,144.8410,Australia/Melbourne
+MEM,Memphis International,35.0424,-89.9767,America/Chicago
+MEX,Mexico City Benito Juarez,19.4363,-99.0721,America/Mexico_City
+MHT,Manchester-Boston Regional,42.9326,-71.4357,America/New_York
+MIA,Miami International,25.7959,-80.2870,America/New_York
+MSP,Minneapolis-Saint Paul International,44.8848,-93.2223,America/Chicago
+MSY,Louis Armstrong New Orleans International,29.9934,-90.2580,America/Chicago
+MTJ,Montrose Regional,38.5098,-107.8940,America/Denver
+MUC,Munich,48.3538,11.7861,Europe/Berlin
+MYR,Myrtle Beach International,33.6797,-78.9283,America/New_York
+NRT,Tokyo Narita International,35.7720,140.3929,Asia/Tokyo
+OAK,Oakland International,37.7126,-122.2197,America/Los_Angeles
+OGG,Kahului,20.8986,-156.4305,Pacific/Honolulu
+OKC,Will Rogers World,35.3931,-97.6007,America/Chicago
+OMA,Eppley Airfield,41.3032,-95.8941,America/Chicago
+ORD,Chicago O'Hare International,41.9742,-87.9073,America/Chicago
+ORF,Norfolk International,36.8946,-76.2012,America/New_York
+OSL,Oslo Gardermoen,60.1939,11.1004,Europe/Oslo
+PBI,Palm Beach International,26.6832,-80.0956,America/New_York
+PDX,Portland International,45.5898,-122.5951,America/Los_Angeles
+PEK,Beijing Capital International,40.0799,116.6031,Asia/Shanghai
+PHL,Philadelphia International,39.8729,-75.2437,America/New_York
+PHX,Phoenix Sky Harbor International,33.4342,-112.0116,America/Phoenix
+PIT,Pittsburgh International,40.4915,-80.2329,America/New_York
+PVD,Rhode Island T. F. Green International,41.7240,-71.4283,America/New_York
+PVG,Shanghai Pudong International,31.1443,121.8083,Asia/Shanghai
+PWM,Portland International Jetport,43.6462,-70.3093,America/New_York
+RDU,Raleigh-Durham International,35.8776,-78.7875,America/New_York
+RIC,Richmond International,37.5052,-77.3197,America/New_York
+RNO,Reno-Tahoe International,39.4991,-119.7681,America/Los_Angeles
+ROC,Greater Rochester International,43.1189,-77.6724,America/New_York
+RSW,Southwest Florida International,26.5362,-81.7552,America/New_York
+SAN,San Diego International,32.7336,-117.1897,America/Los_Angeles
+SAV,Savannah/Hilton Head International,32.1276,-81.2021,America/New_York
+SCL,Santiago Arturo Merino Benitez,-33.3930,-70.7858,America/Santiago
+SEA,Seattle-Tacoma International,47.4502,-122.3088,America/Los_Angeles
+SFO,San Francisco International,37.6213,-122.3790,America/Los_Angeles
+SIN,Singapore Changi,1.3644,103.9915,Asia/Singapore
+SJC,San Jose Mineta International,37.3639,-121.9289,America/Los_Angeles
+SLC,Salt Lake City International,40.7899,-111.9791,America/Denver
+SMF,Sacramento International,38.6954,-121.5908,America/Los_Angeles
+SNA,John Wayne Orange County,33.6757,-117.8683,America/Los_Angeles
+STL,St. Louis Lambert International,38.7487,-90.3700,America/Chicago
+SUN,Friedman Memorial,43.5044,-114.2963,America/Boise
+SYD,Sydney Kingsford Smith,-33.9399,151.1753,Australia/Sydney
+SYR,Syracuse Hancock International,43.1112,-76.1063,America/New_York
+TLV,Tel Aviv Ben Gurion,32.0114,34.8867,Asia/Jerusalem
+TPA,Tampa International,27.9755,-82.5332,America/New_York
+TUL,Tulsa International,36.1984,-95.8881,America/Chicago
+TUS,Tucson International,32.1161,-110.9410,America/Phoenix
+VIE,Vienna International,48.1103,16.5697,Europe/Vienna
+YUL,Montreal-Trudeau International,45.4706,-73.7408,America/Toronto
+YVR,Vancouver International,49.1967,-123.1815,America/Vancouver
+YYZ,Toronto Pearson International,43.6777,-79.6248,America/Toronto
+ZRH,Zurich,47.4647,8.5492,Europe/Zurich

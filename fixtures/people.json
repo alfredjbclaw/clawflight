@@ -1,0 +1,28 @@
+{
+  "owner": "alex",
+  "people": [
+    {
+      "key": "alex",
+      "display": "Alex",
+      "match_substrings": [
+        "alex kestrel",
+        "alexandra kestrel",
+        "alexandra morgan kestrel"
+      ],
+      "match_email_localparts": ["alex", "alex.kestrel", "a.kestrel"]
+    },
+    {
+      "key": "sam",
+      "display": "Sam",
+      "match_substrings": ["sam kestrel", "samuel kestrel", "samuel t kestrel"],
+      "match_email_localparts": ["sam", "sam.kestrel", "s.kestrel"]
+    },
+    {
+      "key": "robin",
+      "display": "Robin",
+      "match_substrings": ["robin kestrel", "robin j kestrel"],
+      "match_email_localparts": ["robin", "robin.kestrel"],
+      "possessive_aliases": ["parent"]
+    }
+  ]
+}

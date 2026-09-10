@@ -1,0 +1,33 @@
+From: American Airlines <no-reply@notify.aa.example>
+To: family-flights@example.com
+Subject: Your trip confirmation and receipt
+
+SYNTHETIC FIXTURE — every name, code and booking below is invented.
+
+[Hello Mr. Sam Kestrel!]
+
+Your trip confirmation and receipt
+
+Record locator: **FAKEA2**
+
+Friday, February 27, 2026
+
+ITH
+7:45 AM
+
+CLT
+10:20 AM
+
+American Airlines 5134
+Seats: 12A
+
+Saturday, February 28, 2026
+
+CLT
+8:05 AM
+
+LAX
+10:40 AM
+
+American Airlines 776
+Seats: 4C

@@ -1,0 +1,29 @@
+From: Delta Air Lines <messages@notify.delta.example>
+To: family-flights@example.com
+Subject: Flight Schedule Change
+
+SYNTHETIC FIXTURE — every name, code and booking below is invented.
+
+Flight Schedule Change
+
+Trip Confirmation [#FAKEA3]
+
+We have updated one of the flights on your trip. No action is needed.
+
+Your New Flight Info
+
+Delta 365
+Thu, May 21
+NYC-KENNEDY
+6:00 AM
+SAN FRANCISCO
+9:35 AM
+
+Your Original Flight Info
+
+Delta 667
+Thu, May 21
+NYC-KENNEDY
+7:30 AM
+SAN FRANCISCO
+11:05 AM

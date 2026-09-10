@@ -1,0 +1,55 @@
+{
+  // A runnable demo config wired to the synthetic fixtures in this repository.
+  // `make demo` uses it to drive the CLI end to end with no credentials and no
+  // network. For a real install start from clawflight.example.json instead.
+  "owner": "alex",
+
+  "people": [
+    {
+      "key": "alex",
+      "display": "Alex",
+      "match_substrings": [
+        "alex kestrel",
+        "alexandra kestrel",
+        "alexandra morgan kestrel"
+      ],
+      "match_email_localparts": ["alex", "alex.kestrel"]
+    },
+    {
+      "key": "sam",
+      "display": "Sam",
+      "match_substrings": ["sam kestrel", "samuel kestrel", "samuel t kestrel"],
+      "match_email_localparts": ["sam", "sam.kestrel"]
+    },
+    {
+      "key": "robin",
+      "display": "Robin",
+      "match_substrings": ["robin kestrel", "robin j kestrel"],
+      "match_email_localparts": ["robin", "robin.kestrel"]
+    }
+  ],
+
+  "recipients": [
+    {
+      "key": "alex",
+      "name": "Alex",
+      "follow_all": true,
+      "channel": { "channel": "telegram", "to": "-1001234567890:topic:42" }
+    },
+    {
+      "key": "sam",
+      "name": "Sam",
+      "channel": { "channel": "whatsapp", "to": "+15551234567" }
+    }
+  ],
+
+  // The offline ingestion path: a file drop rather than a live mailbox.
+  "mailbox": {
+    "adapter": "mbox",
+    "path": "fixtures/inbox.mbox",
+    "trusted_senders": ["air.example"]
+  },
+
+  "push": { "enabled": false },
+  "horizon_days": 3
+}

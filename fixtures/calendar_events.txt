@@ -1,0 +1,136 @@
+Calendar Events — synthetic fixture, entirely fictional
+All people, addresses, confirmation codes and bookings below are invented for
+tests. Confirmation codes use the obviously-synthetic FAKEnn form.
+
+── Saturday, Jul 11, 2026 ──────────────────────────────────────
+
+  Alex — ASE to DFW to JFK (AA 4912 / AA 1203)
+  ID: cal-0001
+  12:51 – 22:30
+  Calendar: Family Travel
+  Location: ASE to DFW to JFK
+  Attendees: alex.kestrel@example.com, sam.kestrel@example.com
+  Notes:
+    Confirmation code: FAKE01 American Airlines
+    ASE 12:51 PM AA 4912 DFW 4:10 PM Seat: 10C
+    DFW 5:39 PM AA 1203 JFK 10:30 PM Seat: 21D
+    Passenger Info Name: ALEXANDRA MORGAN KESTREL
+
+  Alex — ASE to DFW (AA 4912)
+  ID: cal-0002
+  Calendar: Work
+  Location: ASE to DFW
+  Notes:
+    American Airlines ASE 12:51 PM AA 4912 DFW 4:10 PM
+
+  Dinner with the Kestrels
+  ID: cal-0020
+  19:00 – 20:30
+  Calendar: Personal
+  Location: New York
+
+  Hotel check-in — Aspen
+  ID: cal-0022
+  15:00 – 16:00
+  Calendar: Personal
+  Notes:
+    Confirmation code: FAKE99 Two nights, one king room, late checkout requested.
+
+  American Airlines — itinerary update
+  ID: cal-0006
+  Calendar: Family Travel
+  Notes:
+    Your flight changed We made these changes to your flight:
+    * New depart time: 6:07 PM * New arrival time: 11:00 PM
+    NEW FLIGHT Jul 11, 2026 DFW JFK 6:07 PM 11:00 PM AA 1203
+    ORIGINAL FLIGHT Jul 11, 2026 DFW JFK 5:39 PM 10:30 PM AA 1203
+
+  Delta — trip cancelled
+  ID: cal-0007
+  Calendar: Family Travel
+  Notes:
+    Your trip has been cancelled. Confirmation code: FAKE05
+    We are sorry for the disruption. No further action is needed.
+
+── Sunday, Jul 12, 2026 ────────────────────────────────────────
+
+  Sam — primary option (UA 512)
+  ID: cal-0010
+  08:00 – 11:15
+  Calendar: Family Travel
+  Location: SFO to SEA
+  Attendees: sam.kestrel@example.com
+  Notes:
+    Confirmation code: FAKE06 United Airlines
+    SFO 8:00 AM UA 512 SEA 11:15 AM Seat: 14A
+    Passenger Info Name: SAMUEL T KESTREL
+
+  Sam — backup option (AS 318)
+  ID: cal-0011
+  10:30 – 13:40
+  Calendar: Family Travel
+  Location: SFO to SEA
+  Notes:
+    Confirmation code: FAKE07 Alaska Airlines
+    SFO 10:30 AM AS 318 SEA 1:40 PM Seat: 9C
+    Passenger Info Name: SAM KESTREL
+
+  Robin's flight home (DL 1120)
+  ID: cal-0012
+  21:15 – 23:59
+  Calendar: Family Travel
+  Location: LAX to JFK
+  Notes:
+    Delta Air Lines DL 1120 departs LAX in the evening and arrives JFK overnight.
+
+  Book flights for the reunion
+  ID: cal-0021
+  09:00 – 10:00
+  Calendar: Personal
+
+  Guest itinerary (WN 1470)
+  ID: cal-0031
+  06:00 – 07:05
+  Calendar: Family Travel
+  Location: LAS to PHX
+  Notes:
+    Southwest Airlines LAS 6:00 AM WN 1470 PHX 7:05 AM
+    Passenger Info Name: TAYLOR RIVERS
+
+── Thursday, Jul 16, 2026 ──────────────────────────────────────
+
+  Alex — flight to Los Angeles
+  ID: cal-0004
+  16:55 – 20:20
+  Calendar: Family Travel
+  Location: JFK to LAX
+  Notes:
+    AWARD RECEIPT Confirmation code: FAKE02 Delta Air Lines
+    Flight: 767 JFK 4:55 PM DL 767 LAX 8:20 PM
+    DELTA 767 22E
+    You are all set. If your plans change you may adjust or cancel this
+    itinerary online. Award tickets are usually non-refundable once the risk
+    free cancellation period ends. Failure to appear for any flight without
+    notice will result in cancellation of the remaining reservation.
+    Passenger Info Name: ALEXANDRA MORGAN KESTREL
+
+  Team offsite travel (B6 622)
+  ID: cal-0030
+  07:00 – 08:10
+  Calendar: Work
+  Location: JFK to BOS
+  Attendees: sam.kestrel@example.com, ops@example.com
+  Notes:
+    JetBlue 622 JFK 7:00 AM B6 622 BOS 8:10 AM
+
+── Friday, Jul 17, 2026 ────────────────────────────────────────
+
+  Alex — return from Aspen (DL 2201)
+  ID: cal-0005
+  13:20 – 15:05
+  Calendar: Family Travel
+  Location: Aspen to LAX
+  Notes:
+    Delta Air Lines Confirmation code: FAKE03
+    ASE 1:20 PM DL 2201 LAX 3:05 PM Seat: 7B
+    Passenger Info Name: ALEX KESTREL

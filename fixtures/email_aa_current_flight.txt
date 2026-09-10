@@ -1,0 +1,19 @@
+From: American Airlines <no-reply@notify.aa.example>
+To: family-flights@example.com
+Subject: Your current flight
+
+SYNTHETIC FIXTURE — every name, code and booking below is invented.
+
+Your current flight
+
+Charlotte (CLT) to Los Angeles (LAX)
+Saturday, February 28, 2026
+Departs 8:05 AM · Arrives 10:40 AM
+
+Want to arrive earlier? Same-day flight changes may be available at the airport
+or in the app on the day you travel. Standby fees may apply on some fares.
+
+Record locator: **FAKEA2**
+
+This message is a status notice, not a booking. It carries no itinerary the
+parser should act on.
