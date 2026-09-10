@@ -11,6 +11,7 @@ simply carry it:
 
     dist/skill/clawflight/
       SKILL.md          agent instructions (copied from skill/)
+      LICENSE           the project licence, so the listing states it correctly
       clawflight        launcher: puts engine/ on sys.path, calls the CLI
       engine/clawflight/…   the package, verbatim
 
@@ -96,6 +97,14 @@ def build(output_root: Path = DEFAULT_OUTPUT, slug: str = SLUG) -> Path:
     bundle.mkdir(parents=True)
 
     shutil.copy2(SOURCE_SKILL, bundle / "SKILL.md")
+
+    # Ship the licence with the code. Without it ClawHub listed the skill as
+    # MIT-0 ("no attribution required"), which is not the licence this project
+    # grants — MIT keeps the notice requirement.
+    licence = REPO / "LICENSE"
+    if not licence.is_file():
+        raise SystemExit("missing LICENSE; the bundle would be published unlicensed")
+    shutil.copy2(licence, bundle / "LICENSE")
 
     launcher = bundle / "clawflight"
     launcher.write_text(LAUNCHER, encoding="utf-8")

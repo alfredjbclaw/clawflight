@@ -1,6 +1,6 @@
 ---
 name: clawflight
-version: 0.2.0
+version: 0.2.1
 description: >-
   Watch family flights and alert a group chat — takeoff, landing, delays, gate
   and schedule changes, tight connections. Use to track, follow or mute a

@@ -24,6 +24,15 @@ def bundle(tmp_path_factory) -> Path:
     return build_skill_bundle.build(tmp_path_factory.mktemp("skill-dist"))
 
 
+def test_the_bundle_ships_the_licence(bundle) -> None:
+    # Without it the registry listed the skill as MIT-0, which grants more than
+    # this project does: MIT keeps the attribution requirement.
+    licence = (bundle / "LICENSE").read_text(encoding="utf-8")
+
+    assert "MIT License" in licence
+    assert "Alfred J Berchtold" in licence
+
+
 def test_the_bundle_carries_skill_launcher_and_engine(bundle) -> None:
     assert (bundle / "SKILL.md").is_file()
     assert (bundle / "clawflight").is_file()
