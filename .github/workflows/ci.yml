@@ -47,7 +47,8 @@ jobs:
       - name: The suite must run with no network at all
         # Not a claim, a check. Adding the live feed adapter immediately made
         # two CLI tests start making real requests; this is what caught it.
-        run: python -m pytest tests -q -p no:cacheprovider -p no_network_plugin
+        # PYTHONPATH=tests because the plugin lives beside the tests it guards.
+        run: PYTHONPATH=tests python -m pytest tests -q -p no:cacheprovider -p no_network_plugin
 
       - name: Refuse a suite that silently collects nothing
         # A green run over zero tests looks identical to a green run over all of

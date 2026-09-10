@@ -1,11 +1,16 @@
-.PHONY: test gate pii history demo skill-bundle clean
+.PHONY: test test-offline gate pii history demo skill-bundle clean
 
 # The whole gate: offline, no credentials, no network.
 test:
 	python3 -m pytest tests -q
 
+# The same suite with every socket blocked. The engine is meant to run offline;
+# this is what proves it rather than asserting it.
+test-offline:
+	PYTHONPATH=tests python3 -m pytest tests -q -p no:cacheprovider -p no_network_plugin
+
 # Everything that must be green before publishing.
-gate: test history skill-bundle
+gate: test test-offline history skill-bundle
 	@echo "gate: clean"
 
 pii:
