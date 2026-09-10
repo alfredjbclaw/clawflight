@@ -654,6 +654,20 @@ class Monitor:
                 else None
             )
 
+    def forget(self, flight_id: str) -> bool:
+        """Drop the tracking state for one flight.
+
+        Paired with ``Registry.forget``: leaving the phase and "already sent"
+        markers behind would silently suppress alerts if the same flight were
+        added again later.
+        """
+        with self._lock, self._cross_process_lock():
+            if flight_id not in self._state:
+                return False
+            del self._state[flight_id]
+            self._write_state()
+            return True
+
     def prune(
         self,
         known_flight_ids: "set[str]",

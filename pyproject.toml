@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clawflight"
-version = "0.1.0"
+version = "0.2.0"
 description = "Family flight alerts in your group chat, powered by a forwarding address."
 readme = "README.md"
 requires-python = ">=3.9"

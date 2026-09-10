@@ -45,8 +45,10 @@ calendar export (optional adapter) ───────────────
 - **Nothing costs tokens while idle.** The cron jobs are command payloads with
   no model call, and `tick` exits immediately when nobody is within six hours of
   a departure.
+- **Nothing to edit by hand.** People, recipients, flights and settings are all
+  CLI commands, so the agent can set it up for you in conversation.
 - **Offline-testable.** Pure standard library, zero runtime dependencies, and a
-  380+ test suite that runs with no network and no credentials.
+  450+ test suite that CI runs with every socket blocked.
 
 ## Quickstart
 
@@ -54,12 +56,22 @@ Not on PyPI yet — install from source:
 
 ```sh
 pip install git+https://github.com/alfredjbclaw/clawflight
-mkdir -p ~/.openclaw/clawflight
-cp examples/clawflight.example.json ~/.openclaw/clawflight/clawflight.json
-$EDITOR ~/.openclaw/clawflight/clawflight.json    # people, recipients, mailbox
-clawflight doctor                                 # says exactly what is missing
-clawflight setup                                  # prints the two cron jobs
+
+clawflight person add sam --name Sam --match "sam kestrel"
+clawflight config set owner sam
+clawflight recipient add family --name Family \
+    --channel telegram --to "-1001234567890" --follow-all
+
+clawflight flight add DL767 --date 2026-09-12 \
+    --from JFK --to LAX --depart 16:55 --arrive 20:20 --person sam
+
+clawflight doctor     # says exactly what is still missing
+clawflight setup      # prints the two cron jobs to create
 ```
+
+That is a working tracker — no mailbox, no API key, no config file to edit.
+Point it at a [forwarding address](docs/setup.md) when you want confirmations
+ingested automatically instead of typing flights in.
 
 Full walkthrough: **[docs/setup.md](docs/setup.md)**.
 
@@ -74,8 +86,12 @@ make demo
 
 ```sh
 clawflight status                                   # what is tracked
-clawflight follow DL767-2026-07-16 --recipient sam  # sam wants this one too
-clawflight mute DL767-2026-07-16                    # stop hearing about it
+clawflight follow DL767-2026-09-12 --recipient sam  # sam wants this one too
+clawflight mute DL767-2026-09-12                    # stop hearing about it (reversible)
+clawflight flight remove DL767-2026-09-12           # forget it entirely
+clawflight person list
+clawflight recipient list
+clawflight config show
 clawflight doctor                                   # validate config, audit state
 ```
 
@@ -144,8 +160,8 @@ See **[docs/privacy.md](docs/privacy.md)** for exactly what is stored, and
 ## Development
 
 ```sh
-python3 -m pytest tests -q     # 380+ tests, offline, no credentials
-make gate                      # tests + the PII scan over history
+python3 -m pytest tests -q     # 450+ tests, offline, no credentials
+make gate                      # tests + PII scan + skill bundle
 ```
 
 CI runs the suite on Python 3.9–3.13 (and macOS), the PII scan over the working

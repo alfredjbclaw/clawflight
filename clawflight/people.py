@@ -8,11 +8,16 @@ later source can never overwrite a stronger earlier one:
 ===== ============================================================
 rank   evidence
 ===== ============================================================
+4      a person named outright, e.g. ``flight add --person sam``
 3      an explicit passenger / traveler name on a booking
 2      a possessive calendar title ("Alex's flight to Denver")
 1      a known attendee address on the calendar event
 0      nothing
 ===== ============================================================
+
+Rank 4 exists because a human saying "this is Sam's flight" is better evidence
+than anything inferred from text, and must not be overwritten by a later email
+whose passenger name happens to match somebody else.
 """
 from __future__ import annotations
 
@@ -132,7 +137,17 @@ class PersonTable:
 
     # -- hint-level helpers -------------------------------------------------
 
+    def from_key(self, key: str) -> Optional[PersonRef]:
+        """Resolve a person named outright by their configured key."""
+        if not isinstance(key, str):
+            return None
+        person = self.get(key.strip().casefold())
+        return person.ref if person is not None else None
+
     def person_from_hints(self, hints: dict) -> PersonRef:
+        explicit = self.from_key(hints.get("person_key"))
+        if explicit is not None:
+            return explicit
         passenger = hints.get("passenger_name")
         if isinstance(passenger, str):
             matched = self.from_text(passenger)
@@ -152,6 +167,8 @@ class PersonTable:
         return UNKNOWN_PERSON
 
     def rank(self, hints: dict) -> int:
+        if self.from_key(hints.get("person_key")) is not None:
+            return 4
         passenger = hints.get("passenger_name")
         if isinstance(passenger, str) and self.from_text(passenger) is not None:
             return 3

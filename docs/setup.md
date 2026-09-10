@@ -1,18 +1,27 @@
 # Setup
 
-Fifteen minutes, no API key, no credit card. You need Python 3.9+, a working
-OpenClaw install, and a mailbox you can forward airline email to.
+No API key, no credit card. You need Python 3.9+ and a working OpenClaw
+install. A forwarding mailbox is **optional** — it automates ingestion, but you
+can add flights by hand and be running in a minute.
 
 ## 1. Install
 
+As an OpenClaw skill, which carries the engine and needs nothing else:
+
 ```sh
-pip install clawflight            # or: pipx install clawflight
+openclaw skills install @alfredjbclaw/clawflight
+```
+
+Or as a package (not on PyPI yet, so from source):
+
+```sh
+pip install git+https://github.com/alfredjbclaw/clawflight
 clawflight --version
 ```
 
 From a checkout: `pip install -e .`
 
-## 2. Make a forwarding address
+## 2. Optional: a forwarding address
 
 clawflight reads airline confirmations. It never reads the rest of your mail.
 The cleanest arrangement is a mailbox that only ever receives them:
@@ -28,13 +37,23 @@ The cleanest arrangement is a mailbox that only ever receives them:
 Whichever you choose, clawflight only ever *reads*, and only messages from
 senders you list.
 
-## 3. Write the config
+## 3. Configure it
+
+Every setting is a command — you never have to open the JSON file, and the
+commands validate what you give them and refuse to store a credential.
 
 ```sh
-mkdir -p ~/.openclaw/clawflight
-cp examples/clawflight.example.json ~/.openclaw/clawflight/clawflight.json
-$EDITOR ~/.openclaw/clawflight/clawflight.json
+clawflight person add sam --name Sam --match "sam kestrel"
+clawflight config set owner sam
+clawflight recipient add family --name Family \
+    --channel telegram --to "-1001234567890" --follow-all
+clawflight config keys      # everything that is settable
 ```
+
+Prefer a file? `examples/clawflight.example.json` is a fully commented one;
+copy it to `~/.openclaw/clawflight/clawflight.json`. Note that the commands
+rewrite it as plain JSON, so hand-written comments are lost on the first
+`config set`.
 
 Four things to fill in.
 
@@ -159,13 +178,29 @@ departure, so a two-minute cadence is free while nobody is flying.
 | `tick` | every 2 min | poll watched flights, emit events, deliver |
 | `sweep` | hourly | ingest mail, promote landed flights, prune, retry failed deliveries |
 
-## 7. Use it
+## 7. Add a flight without any email
+
+The fastest way to see it work — no mailbox required:
+
+```sh
+clawflight flight add DL767 --date 2026-09-12 \
+    --from JFK --to LAX --depart 16:55 --arrive 20:20 --person sam
+```
+
+`--from` and `--depart` matter: the watch window opens six hours before
+departure, so a flight with no departure time is never watched at all. The
+command warns you if you leave it out.
+
+`clawflight flight remove <id>` forgets a flight. That is different from
+`mute`, which only silences it for one recipient and can be undone.
+
+## 8. Use it
 
 ```sh
 clawflight status                                  # what is being tracked
-clawflight follow DL767-2026-07-16 --recipient sam # sam wants this one too
-clawflight mute  DL767-2026-07-16                  # stop hearing about it
-clawflight unmute DL767-2026-07-16
+clawflight follow DL767-2026-09-12 --recipient sam # sam wants this one too
+clawflight mute  DL767-2026-09-12                  # stop hearing about it
+clawflight unmute DL767-2026-09-12
 ```
 
 Because clawflight is a skill, your agent drives these verbs for you: "follow
@@ -185,8 +220,10 @@ push upgrade — see [push-upgrade.md](push-upgrade.md).
 
 | symptom | check |
 |---|---|
-| nothing is ingested | `clawflight sweep --dry-run` — is the sender in `trusted_senders`? |
-| flights say "Unknown" | add the airline's spelling to `match_substrings` |
+| nothing is tracked | add one by hand: `clawflight flight add … --from … --depart …` |
+| a flight is tracked but silent | it needs `--from` and `--depart`; without a departure time the watch window never opens |
+| nothing is ingested from mail | `clawflight sweep --dry-run` — is the sender in `trusted_senders`? |
+| flights say "Unknown" | pass `--person <key>` when adding, or add the airline's spelling to `match_substrings` |
 | no messages arrive | `clawflight doctor` — is `openclaw` on `PATH`, and does the recipient have a `channel`? |
 | deliveries keep failing | `clawflight doctor` reports outbox failures; the outbox retries with exponential backoff |
 | a flight will not stop alerting | `clawflight mute <flight-id>` |

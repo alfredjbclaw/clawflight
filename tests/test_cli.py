@@ -171,8 +171,11 @@ def test_tick_assesses_a_flight_inside_the_watch_window(tmp_path, capsys) -> Non
         )
     )
 
+    # --offline as well as --dry-run: the tests never touch the network, and
+    # tick now really does reach the public feeds without it.
     code, payload = _json_run(
-        capsys, "--config", str(path), "--json", "tick", "--dry-run", "--now", str(NOW)
+        capsys, "--config", str(path), "--json", "tick",
+        "--dry-run", "--offline", "--now", str(NOW),
     )
 
     assert code == 0
@@ -194,7 +197,10 @@ def test_tick_dry_run_never_delivers(tmp_path, capsys) -> None:
         )
     )
 
-    _json_run(capsys, "--config", str(path), "--json", "tick", "--dry-run", "--now", str(NOW))
+    _json_run(
+        capsys, "--config", str(path), "--json", "tick",
+        "--dry-run", "--offline", "--now", str(NOW),
+    )
 
     # A dry run leaves no outbox behind for a later real run to drain.
     assert not config.outbox_path.exists()
@@ -479,3 +485,46 @@ def test_self_command_falls_back_when_argv_is_not_a_file(monkeypatch) -> None:
     for argv in ([], [""], ["-c"], ["/nonexistent/clawflight"]):
         monkeypatch.setattr(cli.sys, "argv", argv)
         assert cli.self_command() == "clawflight"
+
+
+def test_tick_uses_the_public_feeds_unless_told_otherwise(tmp_path, capsys, monkeypatch) -> None:
+    """The default has to actually fetch, or milestones can never fire.
+
+    For most of this project's life the CLI shipped a fetcher that returned no
+    position at all, so takeoff, halfway and landing were unreachable while the
+    README promised live tracking.
+    """
+    from clawflight import cli
+    from clawflight.models import Observation
+
+    used = []
+
+    class _Recording:
+        def __init__(self, *args, **kwargs):
+            used.append("feeds")
+
+        def __call__(self, record):
+            return Observation(record.flight_id, None, None, None, NOW)
+
+    monkeypatch.setattr(cli, "PublicFeeds", _Recording)
+    path = _write_config(tmp_path)
+
+    _json_run(capsys, "--config", str(path), "--json", "tick", "--now", str(NOW))
+    assert used == [], "an idle tick must not open a connection at all"
+
+    from clawflight.parse import parse_calendar_events
+
+    config = load_config(path)
+    config.ensure_state_dir()
+    Registry(str(config.registry_path), config.people).merge(
+        parse_calendar_events(
+            (FIXTURES / "calendar_events.txt").read_text(encoding="utf-8"), 2026
+        )
+    )
+    _json_run(capsys, "--config", str(path), "--json", "tick", "--now", str(NOW))
+    assert used == ["feeds"]
+
+    _json_run(
+        capsys, "--config", str(path), "--json", "tick", "--offline", "--now", str(NOW)
+    )
+    assert used == ["feeds"], "--offline must not construct the feed client"

@@ -30,7 +30,7 @@ BACKUP_NOTE = "possible backup/duplicate booking"
 SCHEDULE_CHANGE_NOTE = "Schedule change: airline notified a revised itinerary."
 
 _TERMINAL_STATUSES = ("done", "cancelled")
-_SOURCE_PREFIXES = ("cal:", "mail:", "email:")
+_SOURCE_PREFIXES = ("cal:", "mail:", "email:", "manual:")
 _DEFAULT_SOURCE_PREFIX = "cal:"
 
 
@@ -248,6 +248,21 @@ class Registry:
                 self._write()
             return changed
 
+    def forget(self, flight_id: str) -> bool:
+        """Drop one record outright.
+
+        Distinct from ``set_status(..., "cancelled")``: this is a person saying
+        the flight should never have been here, so no trace of it should keep
+        matching vendor updates or reappearing in status.
+        """
+        with self._cross_process_lock():
+            if flight_id not in self._records:
+                return False
+            del self._records[flight_id]
+            self._attribution_ranks.pop(flight_id, None)
+            self._write()
+            return True
+
     def prune_done(self, now_epoch: float, max_age_days: int = 30) -> "list[str]":
         """Drop 'done' records whose departure is older than max_age_days."""
         with self._cross_process_lock():
@@ -393,7 +408,7 @@ def _legacy_person_rank(record: FlightRecord) -> int:
 def _stored_person_rank(value: object, record: FlightRecord) -> int:
     if isinstance(value, dict):
         rank = value.get("_attribution_rank")
-        if isinstance(rank, int) and 0 <= rank <= 3:
+        if isinstance(rank, int) and 0 <= rank <= 4:
             return rank
     return _legacy_person_rank(record)
 
