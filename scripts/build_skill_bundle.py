@@ -34,6 +34,19 @@ DEFAULT_OUTPUT = REPO / "dist" / "skill"
 #: The skill's folder name becomes its ClawHub slug unless --slug overrides it.
 SLUG = "clawflight"
 
+#: ClawHub owner to publish under. Passing this explicitly is not optional:
+#: another publisher already owns a skill called "clawflight" (an unrelated
+#: Starlink WiFi finder), and resolving the bare slug picks up theirs.
+OWNER = "alfredjbclaw"
+
+#: Discovery topics. **The registry rejects more than five.**
+#:
+#: Chosen to add terms the description does not already contain — searching
+#: "flight" already matches the name and description, so these buy breadth
+#: (travel, aviation) and browse categories (notifications, family) instead.
+TOPICS = ("flight-tracking", "travel", "aviation", "notifications", "family")
+MAX_TOPICS = 5
+
 LAUNCHER = '''#!/usr/bin/env python3
 """Run clawflight from inside the skill bundle.
 
@@ -158,12 +171,34 @@ def verify(bundle: Path) -> None:
             )
 
 
+def publish_command(bundle: Path, version: str, commit: str) -> str:
+    """The exact ClawHub publish invocation, so it is not reinvented by memory."""
+    return " ".join(
+        [
+            "clawhub skill publish {}".format(bundle),
+            "--owner {}".format(OWNER),
+            "--slug {}".format(SLUG),
+            "--version {}".format(version),
+            "--topics {}".format(",".join(TOPICS)),
+            "--source-repo {}/{}".format(OWNER, SLUG),
+            "--source-commit {}".format(commit),
+            "--source-ref refs/heads/main",
+            "--source-path skill",
+        ]
+    )
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--slug", default=SLUG)
     parser.add_argument(
         "--verify", action="store_true", help="run the bundled CLI after building"
+    )
+    parser.add_argument(
+        "--print-publish",
+        action="store_true",
+        help="print the ClawHub publish command for this bundle",
     )
     args = parser.parse_args(argv)
 
@@ -175,6 +210,21 @@ def main(argv=None) -> int:
     if args.verify:
         verify(bundle)
         print("verified: the bundled CLI runs with no install and no PYTHONPATH")
+
+    if args.print_publish:
+        import re
+
+        frontmatter = (bundle / "SKILL.md").read_text(encoding="utf-8").split("---")[1]
+        version = re.search(r"(?m)^version:\s*(\S+)\s*$", frontmatter)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(REPO),
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        print()
+        print(publish_command(bundle, version.group(1) if version else "0.0.0", commit))
     return 0
 
 

@@ -141,3 +141,20 @@ def test_the_skill_version_matches_the_package(bundle) -> None:
 def test_the_skill_declares_a_homepage(bundle) -> None:
     # Shown as "Website" in the Skills UI and the only route back to the source.
     assert "homepage: https://github.com/alfredjbclaw/clawflight" in _frontmatter(bundle)
+
+
+def test_topics_stay_within_the_registry_limit() -> None:
+    # ClawHub rejects a publish carrying more than five topics. Discovered the
+    # hard way: a twelve-topic attempt failed after the upload.
+    assert len(build_skill_bundle.TOPICS) <= build_skill_bundle.MAX_TOPICS
+    assert len(set(build_skill_bundle.TOPICS)) == len(build_skill_bundle.TOPICS)
+
+
+def test_the_publish_command_pins_the_owner() -> None:
+    # Another publisher owns a skill called "clawflight". Resolving the bare
+    # slug finds theirs, so --owner is load-bearing, not decoration.
+    command = build_skill_bundle.publish_command(Path("/tmp/bundle"), "0.1.0", "abc123")
+
+    assert "--owner alfredjbclaw" in command
+    assert "--slug clawflight" in command
+    assert "--source-commit abc123" in command
