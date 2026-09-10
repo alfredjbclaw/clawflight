@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
+import shutil
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 from . import __version__
@@ -34,6 +37,9 @@ from .runner import run_once
 
 TICK_CRON = "*/2 * * * *"
 SWEEP_CRON = "17 * * * *"
+
+#: What the console script is called when it is installed on PATH.
+DEFAULT_COMMAND_NAME = "clawflight"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -124,24 +130,60 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 # --------------------------------------------------------------------------
 
 
+def self_command() -> str:
+    """How to invoke this program from a cron job.
+
+    A bare ``clawflight`` is only correct when the console script is genuinely
+    on PATH. When clawflight is running from the bundled ClawHub skill — where
+    there is no install step at all — a cron job calling ``clawflight`` would
+    simply fail, so emit the absolute path that is actually running.
+    """
+    argv_zero = sys.argv[0] if sys.argv and sys.argv[0] else ""
+    if not argv_zero or argv_zero.endswith(("cli.py", "-c", "-m")):
+        return DEFAULT_COMMAND_NAME
+    try:
+        resolved = Path(argv_zero).resolve()
+    except OSError:  # pragma: no cover - defensive
+        return DEFAULT_COMMAND_NAME
+    if not resolved.is_file():
+        return DEFAULT_COMMAND_NAME
+    on_path = shutil.which(resolved.name)
+    if on_path and Path(on_path).resolve() == resolved:
+        # The console script is installed and reachable by name.
+        return resolved.name
+    return str(resolved)
+
+
 def cron_recipes(config: Config) -> List[str]:
     """The two OpenClaw cron jobs a working install needs.
 
     Command payloads run with no model call, so an idle tick costs zero tokens.
     """
+    command = shlex.quote(self_command())
     config_flag = (
-        ' --config "{}"'.format(config.source_path) if config.source_path else ""
+        " --config {}".format(shlex.quote(str(config.source_path)))
+        if config.source_path
+        else ""
     )
     return [
-        'openclaw cron create --name clawflight-tick --cron "{}" '
-        '--command "clawflight{} tick" --session isolated --delivery none'.format(
-            TICK_CRON, config_flag
-        ),
-        'openclaw cron create --name clawflight-sweep --cron "{}" '
-        '--command "clawflight{} sweep" --session isolated --delivery none'.format(
-            SWEEP_CRON, config_flag
-        ),
+        _recipe("clawflight-tick", TICK_CRON, "{}{} tick".format(command, config_flag)),
+        _recipe("clawflight-sweep", SWEEP_CRON, "{}{} sweep".format(command, config_flag)),
     ]
+
+
+def _recipe(name: str, schedule: str, inner_command: str) -> str:
+    """One ``openclaw cron create`` line.
+
+    ``--command`` carries a whole shell command line as a single argument, so
+    it is quoted as a unit rather than wrapped in hand-written double quotes —
+    a bundled skill can live under a path containing a space or a quote.
+    """
+    return (
+        "openclaw cron create --name {} --cron {} --command {} "
+        "--session isolated --delivery none".format(
+            name, shlex.quote(schedule), shlex.quote(inner_command)
+        )
+    )
 
 
 def _cmd_setup(args: argparse.Namespace, config: Config) -> int:
@@ -178,7 +220,8 @@ def _cmd_setup(args: argparse.Namespace, config: Config) -> int:
         from .adapters.channel_openclaw import subprocess_runner
 
         for recipe in recipes:
-            subprocess_runner(recipe.split(), 60.0)
+            # shlex, not split(): a bundled skill path may contain spaces.
+            subprocess_runner(shlex.split(recipe), 60.0)
         payload["applied"] = True
         lines.append("")
         lines.append("Applied.")

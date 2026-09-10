@@ -50,8 +50,10 @@ calendar export (optional adapter) ───────────────
 
 ## Quickstart
 
+Not on PyPI yet — install from source:
+
 ```sh
-pip install clawflight
+pip install git+https://github.com/alfredjbclaw/clawflight
 mkdir -p ~/.openclaw/clawflight
 cp examples/clawflight.example.json ~/.openclaw/clawflight/clawflight.json
 $EDITOR ~/.openclaw/clawflight/clawflight.json    # people, recipients, mailbox
@@ -77,8 +79,19 @@ clawflight mute DL767-2026-07-16                    # stop hearing about it
 clawflight doctor                                   # validate config, audit state
 ```
 
-Installed as an OpenClaw skill, your agent drives those for you: *"follow
-Robin's flight"*, *"mute DL767"*, *"what flights are coming up?"*
+### As an OpenClaw skill
+
+The skill is self-contained: it carries the engine, which has no dependencies,
+so there is nothing to install beyond the skill itself.
+
+```sh
+openclaw skills install @alfredjbclaw/clawflight
+```
+
+Your agent then drives the verbs for you: *"follow Robin's flight"*,
+*"mute DL767"*, *"what flights are coming up?"*
+
+Build the bundle yourself with `make skill-bundle`.
 
 ## Configuration in one glance
 

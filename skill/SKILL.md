@@ -1,10 +1,11 @@
 ---
 name: clawflight
 description: Track family flights and post alerts to a group chat. Use for follow/mute a flight, what flights are tracked, flight status, or clawflight setup.
+homepage: https://github.com/alfredjbclaw/clawflight
 metadata:
   openclaw:
     requires:
-      bins: [python3, clawflight]
+      bins: [python3]
 ---
 
 # clawflight
@@ -18,20 +19,26 @@ what the user says into one CLI verb, run it, and report the result.
 
 ## Run the CLI
 
-`clawflight` is on PATH. Add `--json` for machine-readable output when you need
-to read fields rather than show text.
+The engine ships inside this skill. It is pure standard library, so there is
+nothing to install — run the bundled launcher directly:
 
 ```sh
-clawflight status                                   # what is tracked
-clawflight --json status                            # same, as JSON
-clawflight follow <flight-id> --recipient <key>     # subscribe someone
-clawflight unfollow <flight-id> --recipient <key>
-clawflight mute <flight-id> --recipient <key>       # stop alerts for one flight
-clawflight unmute <flight-id> --recipient <key>
-clawflight doctor                                   # validate config, audit state
-clawflight setup                                    # print the cron recipes
+{baseDir}/clawflight status                                  # what is tracked
+{baseDir}/clawflight --json status                           # same, as JSON
+{baseDir}/clawflight follow <flight-id> --recipient <key>    # subscribe someone
+{baseDir}/clawflight unfollow <flight-id> --recipient <key>
+{baseDir}/clawflight mute <flight-id> --recipient <key>      # stop alerts
+{baseDir}/clawflight unmute <flight-id> --recipient <key>
+{baseDir}/clawflight doctor                                  # validate + audit
+{baseDir}/clawflight setup                                   # print cron recipes
 ```
 
+If the user has also installed the package (`pip install
+git+https://github.com/alfredjbclaw/clawflight`), a bare `clawflight` on PATH
+works too and is the same program. Prefer the bundled launcher: it is always
+present and always matches these instructions.
+
+Add `--json` when you need to read fields rather than show text.
 `--recipient` defaults to the configured owner. Every verb accepts `--config`
 and `--state-dir`.
 
@@ -39,19 +46,19 @@ and `--state-dir`.
 
 | the user says | run |
 |---|---|
-| "what flights are tracked?" / "any flights coming up?" | `clawflight --json status` |
-| "follow DL767" / "I want alerts for Robin's flight" | resolve to a flight id, then `clawflight follow <id>` |
-| "mute AA1203" / "stop telling me about that flight" | `clawflight mute <id>` |
-| "unmute" / "start telling me again" | `clawflight unmute <id>` |
-| "is clawflight working?" / "why am I not getting alerts?" | `clawflight doctor` |
-| "set up clawflight" / "add the cron jobs" | `clawflight setup`, then show the commands |
+| "what flights are tracked?" / "any flights coming up?" | `{baseDir}/clawflight --json status` |
+| "follow DL767" / "I want alerts for Robin's flight" | resolve to a flight id, then `{baseDir}/clawflight follow <id>` |
+| "mute AA1203" / "stop telling me about that flight" | `{baseDir}/clawflight mute <id>` |
+| "unmute" / "start telling me again" | `{baseDir}/clawflight unmute <id>` |
+| "is clawflight working?" / "why am I not getting alerts?" | `{baseDir}/clawflight doctor` |
+| "set up clawflight" / "add the cron jobs" | `{baseDir}/clawflight setup`, then show the commands |
 
 ### Resolving a flight id
 
 Ids look like `DL767-2026-07-16`, and a second booking on the same flight gets
 `#<confirmation>` appended: `DL767-2026-07-16#FAKE02`.
 
-Users say "DL767" or "Robin's flight". Run `clawflight --json status`, match on
+Users say "DL767" or "Robin's flight". Run `{baseDir}/clawflight --json status`, match on
 `flight`, `traveler`, `date` or `route`, and use the row's `flight_id`.
 
 - **One match** — act, then confirm what you did.
@@ -83,22 +90,23 @@ cause. Relay that, do not summarise it as "something went wrong".
 
 ## Setup, in order
 
-1. `clawflight doctor` — see what is missing.
+1. `{baseDir}/clawflight doctor` — see what is missing.
 2. Edit `~/.openclaw/clawflight/clawflight.json` (see `docs/setup.md`):
    `owner`, `people`, `recipients`, `mailbox`.
 3. Set the mailbox password:
    `openclaw config set skills.entries.clawflight.env.CLAWFLIGHT_IMAP_PASSWORD '<app-password>'`
-4. `clawflight doctor` again — it must exit 0.
-5. `clawflight setup` and create the two cron jobs it prints.
+4. `{baseDir}/clawflight doctor` again — it must exit 0.
+5. `{baseDir}/clawflight setup` and create the two cron jobs it prints.
 
-The jobs use command payloads, so they make no model call and cost nothing while
-idle:
+The jobs use command payloads, so they make no model call and cost nothing
+while idle. `setup` prints them with the correct absolute path already filled
+in — show what it printed rather than retyping this shape:
 
 ```sh
 openclaw cron create --name clawflight-tick  --cron "*/2 * * * *" \
-  --command "clawflight tick"  --session isolated --delivery none
+  --command "<path>/clawflight tick"  --session isolated --delivery none
 openclaw cron create --name clawflight-sweep --cron "17 * * * *" \
-  --command "clawflight sweep" --session isolated --delivery none
+  --command "<path>/clawflight sweep" --session isolated --delivery none
 ```
 
 ## What it alerts on
@@ -120,7 +128,7 @@ Two behaviours worth explaining when they come up:
 
 | symptom | first move |
 |---|---|
-| nothing tracked | `clawflight sweep --dry-run` — is the sender in `trusted_senders`? |
+| nothing tracked | `{baseDir}/clawflight sweep --dry-run` — is the sender in `trusted_senders`? |
 | traveler shows "Unknown" | add the airline's spelling of the name to that person's `match_substrings` |
-| no messages arriving | `clawflight doctor` — `openclaw` on PATH, and does the recipient have a `channel`? |
+| no messages arriving | `{baseDir}/clawflight doctor` — `openclaw` on PATH, and does the recipient have a `channel`? |
 | deliveries failing | `doctor` reports outbox failures; the outbox retries with backoff, so check the channel target first |

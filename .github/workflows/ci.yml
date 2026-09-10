@@ -141,3 +141,30 @@ jobs:
 
       - name: End-to-end demo over the synthetic fixtures
         run: make demo
+
+  skill:
+    name: skill bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the self-contained skill bundle
+        # --verify runs the bundled launcher from an unrelated cwd with
+        # PYTHONPATH cleared, so a bundle that only works inside a source
+        # checkout fails here rather than after someone installs it.
+        run: ./scripts/build_skill_bundle.py --verify
+
+      - name: The bundle needs nothing on PATH
+        # Prove it against an empty PATH except the interpreter: the whole
+        # promise of the bundle is that installing the skill is enough.
+        run: |
+          bundle=dist/skill/clawflight
+          test -x "${bundle}/clawflight"
+          test -f "${bundle}/engine/clawflight/data/airports.csv"
+          cd /tmp
+          env -i PATH="$(dirname "$(command -v python3)")" \
+            python3 "${GITHUB_WORKSPACE}/${bundle}/clawflight" --version

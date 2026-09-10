@@ -404,3 +404,78 @@ def test_the_state_dir_flag_overrides_the_config_file(tmp_path, capsys) -> None:
     )
 
     assert payload["state_dir"] == str(override)
+
+
+# -- cron recipes point at whatever is actually running ---------------------
+
+
+def test_cron_recipes_use_the_running_program_not_a_bare_name(tmp_path, monkeypatch) -> None:
+    """A bundled skill has no console script on PATH.
+
+    Emitting a bare `clawflight` would produce a cron job that simply fails for
+    anyone who installed the skill instead of pip-installing the package.
+    """
+    from clawflight import cli
+
+    launcher = tmp_path / "bundle" / "clawflight"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    monkeypatch.setattr(cli.sys, "argv", [str(launcher)])
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+
+    import shlex
+
+    assert cli.self_command() == str(launcher.resolve())
+    for recipe in cli.cron_recipes(load_config(None)):
+        argv = shlex.split(recipe)
+        inner = shlex.split(argv[argv.index("--command") + 1])
+        assert inner[0] == str(launcher.resolve())
+
+
+def test_cron_recipes_use_the_bare_name_when_it_is_on_path(tmp_path, monkeypatch) -> None:
+    from clawflight import cli
+
+    installed = tmp_path / "bin" / "clawflight"
+    installed.parent.mkdir()
+    installed.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    monkeypatch.setattr(cli.sys, "argv", [str(installed)])
+    monkeypatch.setattr(cli.shutil, "which", lambda name: str(installed))
+
+    import shlex
+
+    assert cli.self_command() == "clawflight"
+    for recipe in cli.cron_recipes(load_config(None)):
+        argv = shlex.split(recipe)
+        inner = shlex.split(argv[argv.index("--command") + 1])
+        assert inner[0] == "clawflight"
+        assert inner[-1] in ("tick", "sweep")
+
+
+def test_cron_recipes_survive_a_path_with_spaces_and_a_quote(tmp_path, monkeypatch) -> None:
+    # A ClawHub skill can be installed under any path the user has.
+    import shlex
+
+    from clawflight import cli
+
+    launcher = tmp_path / "My Skills' dir" / "clawflight"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+    monkeypatch.setattr(cli.sys, "argv", [str(launcher)])
+    monkeypatch.setattr(cli.shutil, "which", lambda name: None)
+
+    recipe = cli.cron_recipes(load_config(None))[0]
+
+    # The recipe parses as a shell command line...
+    argv = shlex.split(recipe)
+    inner = argv[argv.index("--command") + 1]
+    # ...and its --command value parses again, back to the real launcher path.
+    assert shlex.split(inner)[0] == str(launcher.resolve())
+    assert shlex.split(inner)[-1] == "tick"
+
+
+def test_self_command_falls_back_when_argv_is_not_a_file(monkeypatch) -> None:
+    from clawflight import cli
+
+    for argv in ([], [""], ["-c"], ["/nonexistent/clawflight"]):
+        monkeypatch.setattr(cli.sys, "argv", argv)
+        assert cli.self_command() == "clawflight"
