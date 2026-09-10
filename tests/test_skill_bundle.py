@@ -98,3 +98,46 @@ def test_rebuilding_replaces_rather_than_accumulates(tmp_path) -> None:
     second = build_skill_bundle.build(output)
 
     assert not (second / "engine" / "clawflight" / "leftover.py").exists()
+
+
+# -- listing metadata -------------------------------------------------------
+
+
+def _frontmatter(bundle: Path) -> str:
+    return (bundle / "SKILL.md").read_text(encoding="utf-8").split("---")[1]
+
+
+def _description(bundle: Path) -> str:
+    block = re.search(
+        r"description: >-\n((?:[ \t]{2,}.*\n)+)", _frontmatter(bundle)
+    )
+    assert block is not None, "description must be a folded block scalar"
+    return " ".join(line.strip() for line in block.group(1).splitlines())
+
+
+def test_the_description_stays_short_enough_for_a_system_prompt(bundle) -> None:
+    # It is injected into the agent's prompt every session, so length is a real
+    # running cost, not just a listing detail.
+    assert len(_description(bundle)) <= 260
+
+
+def test_the_description_carries_its_trigger_words(bundle) -> None:
+    # This is what decides whether the agent reaches for the skill at all.
+    description = _description(bundle).lower()
+
+    for trigger in ("track", "follow", "mute", "flight", "alert"):
+        assert trigger in description, trigger
+
+
+def test_the_skill_version_matches_the_package(bundle) -> None:
+    import clawflight
+
+    version = re.search(r"(?m)^version:\s*(\S+)\s*$", _frontmatter(bundle))
+
+    assert version is not None
+    assert version.group(1) == clawflight.__version__
+
+
+def test_the_skill_declares_a_homepage(bundle) -> None:
+    # Shown as "Website" in the Skills UI and the only route back to the source.
+    assert "homepage: https://github.com/alfredjbclaw/clawflight" in _frontmatter(bundle)

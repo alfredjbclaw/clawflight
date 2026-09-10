@@ -1,6 +1,10 @@
 ---
 name: clawflight
-description: Track family flights and post alerts to a group chat. Use for follow/mute a flight, what flights are tracked, flight status, or clawflight setup.
+version: 0.1.0
+description: >-
+  Watch family flights and alert a group chat — takeoff, landing, delays, gate
+  and schedule changes, tight connections. Use to track, follow or mute a
+  flight, see upcoming flights, or set up alerts. No API key.
 homepage: https://github.com/alfredjbclaw/clawflight
 metadata:
   openclaw:
