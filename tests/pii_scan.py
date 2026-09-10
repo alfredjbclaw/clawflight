@@ -101,16 +101,27 @@ def scan_worktree(strict: bool) -> Tuple[List[str], int]:
 # --------------------------------------------------------------------------
 
 
-def publishable_blobs() -> Dict[str, str]:
-    """Object id -> path, for every blob a push would expose.
+def _history_scope() -> List[str]:
+    """The rev-list arguments describing what a push would expose.
 
     ``--branches --tags`` on purpose: that is exactly what publishing exposes.
     Remote-tracking refs belong to the remote, and ``refs/original/*`` left by a
     history rewrite must be deleted rather than scanned — a rewrite is not
     finished until it is gone.
+
+    A CI checkout is normally a detached HEAD with no local branch, where that
+    selection is empty. Falling back to HEAD keeps the scan meaningful there
+    rather than silently reporting a clean nothing.
     """
+    if _git("rev-list", "--branches", "--tags", "--max-count=1").strip():
+        return ["--branches", "--tags"]
+    return ["HEAD"]
+
+
+def publishable_blobs() -> Dict[str, str]:
+    """Object id -> path, for every blob a push would expose."""
     blobs: Dict[str, str] = {}
-    for line in _git("rev-list", "--objects", "--branches", "--tags").splitlines():
+    for line in _git("rev-list", "--objects", *_history_scope()).splitlines():
         object_id, _, path = line.partition(" ")
         if not path or is_self_referential(path):
             continue
@@ -170,7 +181,7 @@ def scan_commit_metadata(strict: bool) -> List[str]:
     findings = []
     rules = blocklist(strict)
     identities = _git(
-        "log", "--branches", "--tags", "--format=%H%x1f%an <%ae>%x1f%cn <%ce>"
+        "log", *_history_scope(), "--format=%H%x1f%an <%ae>%x1f%cn <%ce>"
     )
     for line in identities.splitlines():
         parts = line.split("\x1f")

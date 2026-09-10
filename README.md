@@ -1,5 +1,9 @@
 # clawflight
 
+[![CI](https://github.com/alfredjbclaw/clawflight/actions/workflows/ci.yml/badge.svg)](https://github.com/alfredjbclaw/clawflight/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
+
 **Family flight alerts in your group chat, powered by a forwarding address.**
 
 Forward your airline confirmation emails to a mailbox clawflight watches (or
@@ -128,8 +132,13 @@ See **[docs/privacy.md](docs/privacy.md)** for exactly what is stored, and
 
 ```sh
 python3 -m pytest tests -q     # 380+ tests, offline, no credentials
-make gate                      # tests + the PII history scan
+make gate                      # tests + the PII scan over history
 ```
+
+CI runs the suite on Python 3.9–3.13 (and macOS), the PII scan over the working
+tree and every blob in history, and a packaging check that installs the wheel
+and runs the CLI. It also plants a known-bad address and requires the scanner to
+reject it, so a scan that has quietly stopped working cannot pass as clean.
 
 Everything in `fixtures/` is synthetic and must stay that way — see
 [fixtures/README.md](fixtures/README.md). `tests/test_no_pii.py` fails the build

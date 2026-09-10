@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Nothing here needs to write to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          # clawflight is mostly run on a Mac. The engine relies on fcntl
+          # locking, atomic os.replace and 0600 temp files, so prove the suite
+          # on macOS too rather than assuming Linux behaviour transfers.
+          - os: macos-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install test dependencies
+        # The package itself has no runtime dependencies, by design.
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Run the suite
+        # No network, no credentials, no fixtures outside the repository.
+        run: python -m pytest tests -q
+
+      - name: Refuse a suite that silently collects nothing
+        # A green run over zero tests looks identical to a green run over all of
+        # them. Assert the suite is actually there.
+        run: |
+          count=$(python -m pytest tests --collect-only -q | grep -cE '^tests/.*: [0-9]+$' || true)
+          echo "collected ${count} test files"
+          if [ "${count}" -lt 20 ]; then
+            echo "::error::only ${count} test files collected; the suite is not running"
+            exit 1
+          fi
+
+  pii:
+    name: no third-party personal data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scan reads every blob in history, so a shallow clone would
+          # check almost nothing while still reporting clean.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Scan the working tree
+        run: python tests/pii_scan.py --worktree
+
+      - name: Scan every publishable blob and commit
+        run: python tests/pii_scan.py
+
+      - name: Prove the scanner can still fail
+        # A scan that cannot fail is a scan that cannot pass. Plant a known-bad
+        # address and require a non-zero exit.
+        run: |
+          printf 'contact: someone.else@gmail.com\n' > planted_in_ci.txt
+          set +e
+          python tests/pii_scan.py --worktree
+          status=$?
+          set -e
+          rm -f planted_in_ci.txt
+          if [ "${status}" -ne 1 ]; then
+            echo "::error::the scanner did not flag a planted address (exit ${status})"
+            exit 1
+          fi
+          echo "scanner correctly rejected the planted address"
+
+  package:
+    name: build and install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/install-check
+          /tmp/install-check/bin/pip install --upgrade pip >/dev/null
+          /tmp/install-check/bin/pip install dist/*.whl
+
+      - name: The console script runs and the airport table ships
+        # Regression guard: the airport table used to live in fixtures/, which
+        # meant an installed package could not import clawflight.parse at all.
+        run: |
+          cd /tmp
+          /tmp/install-check/bin/clawflight --version
+          /tmp/install-check/bin/python - <<'PY'
+          from clawflight.airports import AIRPORTS_CSV, default_airports
+          assert AIRPORTS_CSV.exists(), "packaged airports.csv is missing"
+          airports = default_airports()
+          assert len(airports) > 50, "airport table looks truncated: {}".format(len(airports))
+          print("packaged airport table:", len(airports), "airports")
+          PY
+
+      - name: doctor runs with no config and reports what is missing
+        run: |
+          cd /tmp
+          set +e
+          /tmp/install-check/bin/clawflight --state-dir /tmp/cf-state doctor
+          status=$?
+          set -e
+          # Exit 1 is correct here: an unconfigured install is not healthy.
+          if [ "${status}" -ne 1 ]; then
+            echo "::error::doctor should exit 1 on an unconfigured install, got ${status}"
+            exit 1
+          fi
+
+      - name: End-to-end demo over the synthetic fixtures
+        run: make demo
