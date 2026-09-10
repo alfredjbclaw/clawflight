@@ -27,8 +27,17 @@ MAINTAINER_CONTACTS: Tuple[str, ...] = (
     "alfred.j.berchtold@gmail.com",
 )
 
-#: Paths that necessarily contain the patterns they define.
-SELF_REFERENTIAL = ("test_no_pii.py", "pii_blocklist.py", "pii_scan.py", "history_scan.sh")
+#: Paths that necessarily contain the patterns they define or test against.
+#:
+#: The CI workflow is here because one of its steps plants a known-bad address
+#: and requires the scanner to reject it — proving the scan can still fail.
+SELF_REFERENTIAL = (
+    "test_no_pii.py",
+    "pii_blocklist.py",
+    "pii_scan.py",
+    "history_scan.sh",
+    ".github/workflows/ci.yml",
+)
 
 #: Directories that are never source and never publish.
 SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".venv", "venv", ".mypy_cache"}
