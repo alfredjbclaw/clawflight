@@ -13,6 +13,7 @@ list rather than an exception.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,9 @@ from zoneinfo import ZoneInfo
 
 from .airports import default_airports
 from .models import FlightLeg
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 AIRLINE_NAME_TO_IATA = {
@@ -49,6 +53,9 @@ AIRLINE_NAME_TO_IATA = {
     "envoy air": "MQ",
     "endeavor air": "9E",
 }
+# Calendar-only aliases.  Airline email resolution deliberately uses the
+# separate, validated table below because receipt wording has different
+# coverage and ambiguity rules.
 CITY_TO_IATA = {
     "aspen": "ASE",
     "dallas": "DFW",
@@ -63,19 +70,103 @@ CITY_TO_IATA = {
     "denver": "DEN",
 }
 # Airline receipts print city names, not IATA codes, in their departure and
-# arrival columns. Only mappings we can prove belong here: an unmapped city
-# yields a leg with a missing airport rather than a guess.
+# arrival columns.  Every code here is present in default_airports(); ambiguous
+# city names are deliberately absent until a qualifier identifies the airport.
 AIRLINE_EMAIL_CITY_TO_IATA = {
     "ATLANTA": "ATL",
+    "ANCHORAGE": "ANC",
+    "AUSTIN": "AUS",
+    "BALTIMORE": "BWI",
+    "BOSTON": "BOS",
+    "CHARLOTTE": "CLT",
+    "CHARLESTON SOUTH CAROLINA": "CHS",
+    "CHICAGO MIDWAY": "MDW",
+    "CHICAGO O'HARE": "ORD",
+    "DALLAS FORT WORTH": "DFW",
+    "DALLAS LOVE FIELD": "DAL",
+    "DENVER": "DEN",
+    "DETROIT": "DTW",
+    "DETROIT METROPOLITAN": "DTW",
+    "FORT LAUDERDALE": "FLL",
+    "HARTFORD BRADLEY": "BDL",
+    "HONOLULU": "HNL",
+    "HOUSTON HOBBY": "HOU",
+    "HOUSTON INTERCONTINENTAL": "IAH",
+    "KANSAS CITY INTERNATIONAL": "MCI",
+    "KANSAS CITY MISSOURI": "MCI",
+    "KANSAS CITY MO": "MCI",
+    "LAS VEGAS": "LAS",
+    "LOS ANGELES INTERNATIONAL": "LAX",
+    "MIAMI": "MIA",
+    "MINNEAPOLIS": "MSP",
+    "MINNEAPOLIS ST PAUL": "MSP",
+    "NASHVILLE": "BNA",
+    "NEW ORLEANS": "MSY",
+    "NEW YORK JFK": "JFK",
     "NYC-KENNEDY": "JFK",
     "NYC-LAGUARDIA": "LGA",
     "KENNEDY INTL": "JFK",
+    "NEWARK": "EWR",
+    "OAKLAND": "OAK",
+    "ORLANDO INTERNATIONAL": "MCO",
+    "PHILADELPHIA": "PHL",
+    "PHOENIX SKY HARBOR": "PHX",
+    "PITTSBURGH": "PIT",
+    "PORTLAND INTERNATIONAL": "PDX",
+    "RALEIGH DURHAM": "RDU",
+    "SALT LAKE CITY": "SLC",
+    "SAN DIEGO": "SAN",
     "SAN FRANCISCO": "SFO",
     "SAN FRANCISCO INTL": "SFO",
-    "SAN JOSE": "SJC",
-    "LOS ANGELES": "LAX",
+    "SAN JOSE CALIFORNIA": "SJC",
+    "SAN JOSE COSTA RICA": "SJO",
+    "SAN JOSE CA": "SJC",
+    "SAN JOSE MINETA": "SJC",
+    "MINETA SAN JOSE": "SJC",
     "SEATTLE-TACOMA": "SEA",
-    "BOSTON": "BOS",
+    "SEATTLE": "SEA",
+    "ST LOUIS": "STL",
+    "TAMPA": "TPA",
+    "WASHINGTON DULLES": "IAD",
+    "WASHINGTON NATIONAL": "DCA",
+    # Major international gateways commonly printed on US itineraries.
+    "AMSTERDAM": "AMS",
+    "AUCKLAND": "AKL",
+    "BEIJING CAPITAL": "PEK",
+    "BRUSSELS": "BRU",
+    "BUENOS AIRES EZEIZA": "EZE",
+    "CAIRO": "CAI",
+    "COPENHAGEN": "CPH",
+    "CINCINNATI NORTHERN KENTUCKY": "CVG",
+    "CLEVELAND": "CLE",
+    "DOHA": "DOH",
+    "DUBLIN": "DUB",
+    "DUBAI INTERNATIONAL": "DXB",
+    "FRANKFURT": "FRA",
+    "HONG KONG": "HKG",
+    "ISTANBUL AIRPORT": "IST",
+    "LISBON": "LIS",
+    "LONDON GATWICK": "LGW",
+    "LONDON HEATHROW": "LHR",
+    "MADRID": "MAD",
+    "MELBOURNE TULLAMARINE": "MEL",
+    "MEXICO CITY BENITO JUAREZ": "MEX",
+    "MUNICH": "MUC",
+    "OSLO": "OSL",
+    "PARIS CHARLES DE GAULLE": "CDG",
+    "ROME FIUMICINO": "FCO",
+    "SANTIAGO CHILE": "SCL",
+    "SAO PAULO GUARULHOS": "GRU",
+    "SEOUL INCHEON": "ICN",
+    "SINGAPORE": "SIN",
+    "SYDNEY": "SYD",
+    "TEL AVIV": "TLV",
+    "TOKYO HANEDA": "HND",
+    "TOKYO NARITA": "NRT",
+    "TORONTO PEARSON": "YYZ",
+    "VANCOUVER": "YVR",
+    "VIENNA": "VIE",
+    "ZURICH": "ZRH",
 }
 MAX_AIRLINE_EMAIL_BYTES = 256 * 1024
 
@@ -267,16 +358,13 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
             details = section[flight.end() : flight_end]
             lines = [line.strip() for line in details.splitlines() if line.strip()]
             origin_match = re.fullmatch(
-                r"(?:Standby\s+)?(?P<origin>[A-Z][A-Z -]*?)", lines[0], re.IGNORECASE
+                r"(?:Standby\s+)?(?P<origin>\(?[A-Z]{3}\)?|[A-Z][A-Z ,.\'()\-]*?)",
+                lines[0],
+                re.IGNORECASE,
             ) if lines else None
             dep_field, destination = (
                 _receipt_destination_line(lines[1]) if len(lines) > 1 else (None, None)
             )
-            origin = (
-                _airline_email_city(origin_match.group("origin"))
-                if origin_match else None
-            )
-            dest = _airline_email_city(destination) if destination else None
             dep_time = _clock_value(dep_field)
             arr_time = _clock_value(lines[2]) if len(lines) > 2 else None
             operating_carrier, operating_number = _operating_identity(
@@ -284,7 +372,8 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
             )
             parsed.append(
                 _airline_parsed_flight(
-                    carrier, number, date, origin, dest,
+                    carrier, number, date,
+                    origin_match.group("origin") if origin_match else None, destination,
                     dep_time, arr_time,
                     confirmation.group(1).upper(), seats.get((carrier, number)), hints,
                     operating_carrier, operating_number,
@@ -335,7 +424,7 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
         if carrier is None:
             continue
         prefix = block[: carrier_match.start()]
-        airports = list(re.finditer(r"(?im)^\s*([A-Z]{3})\s*$", prefix))
+        airports = list(re.finditer(r"(?im)^\s*(\(?[A-Z]{3}\)?)\s*$", prefix))
         if len(airports) < 2:
             continue
         dep_time = _clock_in(prefix[airports[0].end() : airports[1].start()])
@@ -394,7 +483,7 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
         return []
     route_text = new_section[heading.end() :]
     cities = list(
-        re.finditer(r"(?im)^\s*([A-Za-z][A-Za-z -]+?)\s*$", route_text)
+        re.finditer(r"(?im)^\s*([A-Za-z][A-Za-z ,.'()\-]+?)\s*$", route_text)
     )
     if len(cities) < 2:
         return []
@@ -414,8 +503,7 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
     return [
         _airline_parsed_flight(
             carrier, int(heading.group("number")), date,
-            _airline_email_city(cities[0].group(1)),
-            _airline_email_city(cities[1].group(1)),
+            cities[0].group(1), cities[1].group(1),
             dep_time, arr_time,
             confirmation.group(1).upper(), None,
             {"notes_excerpt": "Your flight changed"},
@@ -557,12 +645,12 @@ def _generic_route(line: str) -> "Optional[tuple[Optional[str], Optional[str]]]"
     if len(line) > 180:
         return None
     match = re.fullmatch(
-        r"\s*(?:Route\s*:\s*)?(?P<origin>[A-Z]{3})\s*(?:to|->|→|–)\s*"
-        r"(?P<dest>[A-Z]{3})\s*",
+        r"\s*(?:Route\s*:\s*)?(?P<origin>\(?[A-Z]{3}\)?)\s*(?:to|->|→|–)\s*"
+        r"(?P<dest>\(?[A-Z]{3}\)?)\s*",
         line,
         re.IGNORECASE,
     )
-    return (match.group("origin").upper(), match.group("dest").upper()) if match else None
+    return (match.group("origin"), match.group("dest")) if match else None
 
 
 def _generic_from_to(lines, lower: int, upper: int, flight_index: int):
@@ -571,13 +659,13 @@ def _generic_from_to(lines, lower: int, upper: int, flight_index: int):
         if len(lines[index]) > 100:
             continue
         match = re.fullmatch(
-            r"\s*(From|Origin|To|Destination)\s*:\s*([A-Z]{3})\s*",
+            r"\s*(From|Origin|To|Destination)\s*:\s*(\(?[A-Z]{3}\)?)\s*",
             lines[index],
             re.IGNORECASE,
         )
         if match:
             kind = "from" if match.group(1).casefold() in {"from", "origin"} else "to"
-            endpoints.append((abs(index - flight_index), kind, match.group(2).upper()))
+            endpoints.append((abs(index - flight_index), kind, match.group(2)))
     origins = sorted(item for item in endpoints if item[1] == "from")
     destinations = sorted(item for item in endpoints if item[1] == "to")
     return (origins[0][2], destinations[0][2]) if origins and destinations else None
@@ -645,6 +733,14 @@ def _receipt_destination_line(
         if match:
             preceding = normalized[: match.start()].strip()
             return preceding or None, match.group(1)
+    match = re.fullmatch(
+        r"(?P<time>\d{1,2}:\d{2}\s*(?:AM|PM))\s+"
+        r"(?P<city>\(?[A-Za-z]{3}\)?|[A-Za-z][A-Za-z ,.'()\-]{0,120})",
+        normalized,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group("time"), match.group("city")
     return None, None
 
 
@@ -654,7 +750,14 @@ def _clock_in(value: str) -> "Optional[str]":
 
 
 def _airline_email_city(value: str) -> "Optional[str]":
+    if not isinstance(value, str):
+        return None
     normalized = re.sub(r"\s+", " ", value).strip().upper()
+    code = re.fullmatch(r"\(?([A-Z]{3})\)?", normalized)
+    if code and code.group(1) in default_airports():
+        return code.group(1)
+    normalized = re.sub(r"[,\.]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     return AIRLINE_EMAIL_CITY_TO_IATA.get(normalized)
 
 
@@ -672,22 +775,36 @@ def _airline_parsed_flight(
     operating_carrier: "Optional[str]" = None,
     operating_number: "Optional[int]" = None,
 ) -> ParsedFlight:
+    resolved_origin = _airline_email_city(origin) if origin is not None else None
+    resolved_dest = _airline_email_city(dest) if dest is not None else None
+    parsed_hints = dict(hints)
+    unresolved = [
+        value for value, resolved in ((origin, resolved_origin), (dest, resolved_dest))
+        if isinstance(value, str) and value.strip() and resolved is None
+    ]
+    if unresolved:
+        parsed_hints["unresolved_airports"] = list(dict.fromkeys(unresolved))
+        for value in parsed_hints["unresolved_airports"]:
+            _LOGGER.warning(
+                "unresolved airport or city %r for flight %s %s",
+                value[:128], carrier, number,
+            )
     return ParsedFlight(
         leg=FlightLeg(
             carrier=carrier,
             number=number,
             date=date,
-            origin=origin,
-            dest=dest,
-            sched_dep_iso=_time_to_iso(date, dep_time, origin),
+            origin=resolved_origin,
+            dest=resolved_dest,
+            sched_dep_iso=_time_to_iso(date, dep_time, resolved_origin),
             # Arrival clocks remain on the service date; overnight rollover is deferred.
-            sched_arr_iso=_time_to_iso(date, arr_time, dest),
+            sched_arr_iso=_time_to_iso(date, arr_time, resolved_dest),
             conf_code=conf_code,
             seat=seat,
             operating_carrier=operating_carrier,
             operating_number=operating_number,
         ),
-        hints=dict(hints),
+        hints=parsed_hints,
     )
 
 

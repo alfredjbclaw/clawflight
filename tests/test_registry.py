@@ -6,7 +6,7 @@ import pytest
 
 from clawflight.email_ingest import EmailEvidence, EmailItineraryCandidate
 from clawflight.models import FlightLeg
-from clawflight.parse import ParsedFlight, parse_calendar_events
+from clawflight.parse import ParsedFlight, parse_airline_email, parse_calendar_events
 from clawflight.registry import BACKUP_NOTE, Registry, extract_service_date
 
 
@@ -100,6 +100,24 @@ def test_date_guard_distinguishes_unknown_date_from_unknown_booking(registry) ->
     assert registry.nearest_date_for_number(" aa-4912 ", "2026-07-12") == "2026-07-10"
 
 
+def test_merge_reports_unresolved_airports_without_changing_existing_report_fields(
+    registry,
+) -> None:
+    parsed = parse_airline_email("\n".join([
+        "Confirmation: FAKEM1",
+        "Date: 2026-08-19",
+        "Flight: Delta 248",
+        "Route: ZZZ -> LAX",
+    ]), 2026)
+
+    report = registry.merge(parsed)
+
+    # Existing callers can keep reading their established fields.
+    assert report["created"] == ["DL248-2026-08-19"]
+    assert report["updated"] == []
+    assert report["unresolved_airports"] == ["ZZZ"]
+
+
 def test_extract_service_date_returns_none_without_a_parseable_date() -> None:
     assert (
         extract_service_date(
@@ -172,7 +190,10 @@ def test_email_reingestion_is_idempotent(tmp_path, people) -> None:
 
     report = registry.merge_email_candidates([candidate])
 
-    assert report == {"created": [], "updated": [], "backup_groups": []}
+    assert report["created"] == []
+    assert report["updated"] == []
+    assert report["backup_groups"] == []
+    assert report["unresolved_airports"] == []
     assert path.read_text(encoding="utf-8") == before
 
 
@@ -599,7 +620,10 @@ def test_empty_merges_and_missing_lookups_are_harmless(registry) -> None:
     upcoming = registry.upcoming(now, horizon_days=1)
     registry.set_status("missing-flight", "active")
 
-    assert empty_report == {"created": [], "updated": [], "backup_groups": []}
+    assert empty_report["created"] == []
+    assert empty_report["updated"] == []
+    assert empty_report["backup_groups"] == []
+    assert empty_report["unresolved_airports"] == []
     assert registry.get("ZZ9-2026-07-11").person.key == "unknown"
     assert [item.flight_id for item in upcoming] == ["ZZ9-2026-07-11"]
     assert registry.get("missing-flight") is None

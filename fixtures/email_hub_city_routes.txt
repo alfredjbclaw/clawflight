@@ -1,0 +1,55 @@
+From: Delta Air Lines <confirmation@notify.delta.example>
+To: family-flights@example.com
+Subject: Synthetic hub-city itinerary
+
+SYNTHETIC FIXTURE — every name, code and booking below is invented.
+
+** Confirmation Number ** FAKEH1
+
+** MON, 05OCT**DEPART**ARRIVE**
+
+DELTA 101
+
+ATLANTA
+6:00 AM DETROIT
+7:55 AM
+
+** TUE, 06OCT**DEPART**ARRIVE**
+
+DELTA 102
+
+DETROIT
+8:40 AM MINNEAPOLIS
+9:25 AM
+
+** WED, 07OCT**DEPART**ARRIVE**
+
+DELTA 103
+
+MINNEAPOLIS
+10:15 AM SALT LAKE CITY
+11:45 AM
+
+** THU, 08OCT**DEPART**ARRIVE**
+
+DELTA 104
+
+KANSAS CITY, MISSOURI
+1:00 PM ATLANTA
+3:55 PM
+
+** FRI, 09OCT**DEPART**ARRIVE**
+
+DELTA 105
+
+DALLAS LOVE FIELD
+4:10 PM CHICAGO MIDWAY
+6:05 PM
+
+** SAT, 10OCT**DEPART**ARRIVE**
+
+DELTA 106
+
+CHICAGO MIDWAY
+9:15 AM HOUSTON HOBBY
+11:50 AM

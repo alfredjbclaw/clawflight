@@ -5,10 +5,12 @@ import pytest
 
 from clawflight.models import polling_callsign
 from clawflight.parse import (
+    AIRLINE_EMAIL_CITY_TO_IATA,
     AIRLINE_NAME_TO_IATA,
     KNOWN_CARRIERS,
     parse_airline_email,
 )
+from clawflight.airports import default_airports
 
 
 def _parse(fixtures, name, year=2026):
@@ -68,6 +70,28 @@ def test_unknown_designator_in_prose_does_not_become_a_flight(token) -> None:
 
 def test_airline_name_mappings_are_known_designators() -> None:
     assert set(AIRLINE_NAME_TO_IATA.values()) <= KNOWN_CARRIERS
+
+
+def test_airline_email_city_table_covers_known_airports() -> None:
+    mapped_airports = set(AIRLINE_EMAIL_CITY_TO_IATA.values())
+
+    assert len(mapped_airports) >= 40
+    assert mapped_airports <= set(default_airports())
+
+
+def test_hub_cities_in_an_airline_email_resolve(fixtures) -> None:
+    flights = _parse(fixtures, "email_hub_city_routes.txt")
+
+    assert [
+        (flight.leg.origin, flight.leg.dest) for flight in flights
+    ] == [
+        ("ATL", "DTW"),
+        ("DTW", "MSP"),
+        ("MSP", "SLC"),
+        ("MCI", "ATL"),
+        ("DAL", "MDW"),
+        ("MDW", "HOU"),
+    ]
 
 
 def test_generic_email_requires_date_and_route() -> None:
@@ -167,11 +191,12 @@ def test_receipt_keeps_route_when_departure_time_is_bad_or_missing(
     assert flight.leg.sched_arr_iso == "2026-05-11T09:35:00-07:00"
 
 
-def test_receipt_keeps_a_leg_whose_city_is_unmapped(fixtures) -> None:
+def test_receipt_keeps_and_surfaces_a_leg_whose_city_is_unmapped(fixtures, caplog) -> None:
     # Given: the same receipt with an origin city the table does not know.
     text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
     text = text.replace("NYC-KENNEDY", "MYSTERY CITY")
 
+    caplog.set_level("WARNING", logger="clawflight.parse")
     flights = parse_airline_email(text, 2026)
 
     # Then: the leg survives with a missing airport rather than a guessed one.
@@ -180,6 +205,113 @@ def test_receipt_keeps_a_leg_whose_city_is_unmapped(fixtures) -> None:
     assert flights[0].leg.dest == "SFO"
     assert flights[0].leg.sched_dep_iso is None
     assert flights[0].leg.sched_arr_iso == "2026-05-11T09:35:00-07:00"
+    assert flights[0].hints["unresolved_airports"] == ["MYSTERY CITY"]
+    assert "MYSTERY CITY" in caplog.text
+    assert "DL 667" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "city",
+    ["LOS ANGELES", "ORLANDO", "PHOENIX", "BUENOS AIRES", "DUBAI", "ROME"],
+)
+def test_ambiguous_city_only_text_is_reported_not_guessed(city, caplog) -> None:
+    text = "\n".join([
+        "** Confirmation Number ** FAKEB1",
+        "** MON, 11MAY**DEPART**ARRIVE**",
+        "DELTA 667",
+        city,
+        "6:00 AM (LAX)",
+        "9:35 AM",
+    ])
+
+    caplog.set_level("WARNING", logger="clawflight.parse")
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert (flight.leg.origin, flight.leg.dest) == (None, "LAX")
+    assert flight.hints["unresolved_airports"] == [city]
+    assert city in caplog.text
+
+
+def test_ambiguous_san_jose_needs_a_qualifier(fixtures, caplog) -> None:
+    text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    ambiguous = text.replace("SAN JOSE, CALIFORNIA", "SAN JOSE")
+
+    caplog.set_level("WARNING", logger="clawflight.parse")
+    unresolved = parse_airline_email(ambiguous, 2026)[1]
+    qualified = parse_airline_email(text, 2026)[1]
+
+    assert unresolved.leg.origin is None
+    assert unresolved.hints["unresolved_airports"] == ["SAN JOSE"]
+    assert "SAN JOSE" in caplog.text
+    assert qualified.leg.origin == "SJC"
+
+
+def test_san_jose_costa_rica_qualifier_resolves_to_sjo(fixtures) -> None:
+    text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    costa_rica = text.replace("SAN JOSE, CALIFORNIA", "SAN JOSE, COSTA RICA")
+
+    flight = parse_airline_email(costa_rica, 2026)[1]
+
+    assert flight.leg.origin == "SJO"
+
+
+@pytest.mark.parametrize(
+    ("route", "expected"),
+    [
+        ("JFK -> LAX", ("JFK", "LAX")),
+        ("(JFK) -> (LAX)", ("JFK", "LAX")),
+        ("ZZZ -> LAX", (None, "LAX")),
+    ],
+)
+def test_airline_email_accepts_only_known_iata_codes(route, expected, caplog) -> None:
+    caplog.set_level("WARNING", logger="clawflight.parse")
+    text = "\n".join([
+        "Confirmation: FAKEI1",
+        "Date: 2026-10-10",
+        "Flight: Delta 123",
+        "Route: {}".format(route),
+    ])
+
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert (flight.leg.origin, flight.leg.dest) == expected
+    if expected[0] is None:
+        assert flight.hints["unresolved_airports"] == ["ZZZ"]
+        assert "ZZZ" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("layout", "origin", "destination", "expected", "unresolved"),
+    [
+        ("receipt", "(JFK)", "(LAX)", ("JFK", "LAX"), None),
+        ("receipt", "(JFK)", "(ZZZ)", ("JFK", None), "(ZZZ)"),
+        ("receipt", "(ZZZ)", "(LAX)", (None, "LAX"), "(ZZZ)"),
+        ("trip", "(ITH)", "(CLT)", ("ITH", "CLT"), None),
+        ("trip", "(ITH)", "(ZZZ)", ("ITH", None), "(ZZZ)"),
+        ("trip", "(ZZZ)", "(CLT)", (None, "CLT"), "(ZZZ)"),
+    ],
+)
+def test_parenthesised_iata_in_receipt_and_trip_layouts_is_resolved_or_reported(
+    fixtures, caplog, layout, origin, destination, expected, unresolved
+) -> None:
+    fixture_name = (
+        "email_delta_receipt.txt" if layout == "receipt" else "email_aa_trip_confirmation.txt"
+    )
+    text = (fixtures / fixture_name).read_text(encoding="utf-8")
+    if layout == "receipt":
+        text = text.replace("NYC-KENNEDY", origin, 1)
+        text = text.replace("6:00 AM SAN FRANCISCO", "6:00 AM " + destination, 1)
+    else:
+        text = text.replace("ITH", origin, 1)
+        text = text.replace("CLT", destination, 1)
+
+    caplog.set_level("WARNING", logger="clawflight.parse")
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert (flight.leg.origin, flight.leg.dest) == expected
+    if unresolved is not None:
+        assert flight.hints["unresolved_airports"] == [unresolved]
+        assert unresolved in caplog.text
 
 
 def test_trip_confirmation_parses_each_leg_with_seat_and_greeting(fixtures) -> None:

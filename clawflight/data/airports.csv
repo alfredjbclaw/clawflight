@@ -27,6 +27,7 @@ COS,Colorado Springs,38.8058,-104.7008,America/Denver
 CPH,Copenhagen Kastrup,55.6180,12.6508,Europe/Copenhagen
 CVG,Cincinnati/Northern Kentucky International,39.0489,-84.6678,America/New_York
 DCA,Ronald Reagan Washington National,38.8512,-77.0402,America/New_York
+DAL,Dallas Love Field,32.8471,-96.8518,America/Chicago
 DEN,Denver International,39.8561,-104.6737,America/Denver
 DFW,Dallas/Fort Worth International,32.8998,-97.0403,America/Chicago
 DOH,Hamad International,25.2731,51.6081,Asia/Qatar
@@ -46,6 +47,7 @@ GEG,Spokane International,47.6199,-117.5338,America/Los_Angeles
 GRU,Sao Paulo Guarulhos,-23.4356,-46.4731,America/Sao_Paulo
 GSO,Piedmont Triad International,36.0977,-79.9373,America/New_York
 HEL,Helsinki Vantaa,60.3172,24.9633,Europe/Helsinki
+HOU,William P. Hobby,29.6454,-95.2789,America/Chicago
 HKG,Hong Kong International,22.3080,113.9185,Asia/Hong_Kong
 HND,Tokyo Haneda,35.5494,139.7798,Asia/Tokyo
 HNL,Daniel K. Inouye International,21.3187,-157.9224,Pacific/Honolulu
@@ -68,6 +70,7 @@ LHR,London Heathrow,51.4700,-0.4543,Europe/London
 LIM,Lima Jorge Chavez,-12.0219,-77.1143,America/Lima
 LIS,Lisbon Humberto Delgado,38.7756,-9.1354,Europe/Lisbon
 MAD,Madrid Barajas,40.4719,-3.5626,Europe/Madrid
+MDW,Chicago Midway International,41.7868,-87.7522,America/Chicago
 MCI,Kansas City International,39.2976,-94.7139,America/Chicago
 MCO,Orlando International,28.4312,-81.3081,America/New_York
 MEL,Melbourne Tullamarine,-37.6690,144.8410,Australia/Melbourne
@@ -109,6 +112,7 @@ SEA,Seattle-Tacoma International,47.4502,-122.3088,America/Los_Angeles
 SFO,San Francisco International,37.6213,-122.3790,America/Los_Angeles
 SIN,Singapore Changi,1.3644,103.9915,Asia/Singapore
 SJC,San Jose Mineta International,37.3639,-121.9289,America/Los_Angeles
+SJO,Juan Santamaria International,9.9939,-84.2088,America/Costa_Rica
 SLC,Salt Lake City International,40.7899,-111.9791,America/Denver
 SMF,Sacramento International,38.6954,-121.5908,America/Los_Angeles
 SNA,John Wayne Orange County,33.6757,-117.8683,America/Los_Angeles

@@ -80,7 +80,13 @@ class Registry:
         with self._cross_process_lock():
             created: List[str] = []
             updated: List[str] = []
+            unresolved_airports = set()
             for flight in parsed:
+                values = flight.hints.get("unresolved_airports", [])
+                if isinstance(values, (list, tuple, set)):
+                    unresolved_airports.update(
+                        value for value in values if isinstance(value, str) and value
+                    )
                 flight_id = flight_ident(
                     flight.leg.carrier, flight.leg.number, flight.leg.date
                 )
@@ -120,6 +126,7 @@ class Registry:
                 "created": _unique(created),
                 "updated": [value for value in _unique(updated) if value not in created],
                 "backup_groups": backup_groups,
+                "unresolved_airports": sorted(unresolved_airports),
             }
 
     def merge_email_candidates(
