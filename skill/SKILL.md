@@ -2,9 +2,10 @@
 name: clawflight
 version: 0.2.1
 description: >-
-  Watch family flights and alert a group chat — takeoff, landing, delays, gate
-  and schedule changes, tight connections. Use to track, follow or mute a
-  flight, see upcoming flights, or set up alerts. No API key.
+  Watch family flights and alert a group chat or ntfy — takeoff, landing,
+  delays, schedule changes, tight connections. Forward an airline confirmation
+  and it is tracked. Use to follow or mute a flight, see upcoming flights, or
+  set up alerts. No API key.
 homepage: https://github.com/alfredjbclaw/clawflight
 metadata:
   openclaw:
@@ -35,6 +36,7 @@ nothing to install — run the bundled launcher directly:
 {baseDir}/clawflight unmute <flight-id> --recipient <key>
 {baseDir}/clawflight doctor                                  # validate + audit
 {baseDir}/clawflight setup                                   # print cron recipes
+{baseDir}/clawflight serve                                   # push receiver (opt-in upgrade)
 ```
 
 Setting it up and changing it, all without editing a file:
@@ -43,6 +45,7 @@ Setting it up and changing it, all without editing a file:
 {baseDir}/clawflight person add sam --name Sam --match "sam kestrel"
 {baseDir}/clawflight person list
 {baseDir}/clawflight recipient add sam --name Sam --channel telegram --to "-100…"
+{baseDir}/clawflight recipient add sam --name Sam --channel ntfy --to "https://ntfy.sh/<topic>"
 {baseDir}/clawflight recipient list
 {baseDir}/clawflight flight add DL767 --date 2026-09-12 \
     --from JFK --to LAX --depart 16:55 --arrive 20:20 --person sam
@@ -74,7 +77,8 @@ and `--state-dir`.
 | "add my flight DL767 on the 12th" | `{baseDir}/clawflight flight add DL767 --date … --from … --to … --depart … --person …` |
 | "stop tracking that flight" / "delete it" | `{baseDir}/clawflight flight remove <id>` — different from mute, this forgets it |
 | "add my sister" / "track flights for Robin" | `{baseDir}/clawflight person add robin --name Robin --match "robin kestrel"` |
-| "send alerts to our group chat" | `{baseDir}/clawflight recipient add … --channel … --to …` |
+| "send alerts to our group chat" | `{baseDir}/clawflight recipient add … --channel telegram --to …` — any OpenClaw channel works |
+| "send them to my phone without a chat app" | `{baseDir}/clawflight recipient add … --channel ntfy --to "https://ntfy.sh/<topic>"` |
 | "who gets alerts?" / "what channels" | `{baseDir}/clawflight recipient list` |
 
 ### Resolving a flight id
@@ -135,7 +139,12 @@ Everything here is a command. Do not hand-edit the config file.
 4. Add where alerts go. `--follow-all` means "every flight for everyone", which
    is usually what one family chat wants:
    `{baseDir}/clawflight recipient add family --name Family --channel telegram --to "-100…" --follow-all`
-5. Optional — a mailbox, so confirmations are ingested automatically:
+5. Optional — a mailbox, so confirmations are ingested automatically.
+   **The trusted sender is whoever the mail arrives FROM.** Forwarding rewrites
+   the sender, so a forwarded confirmation arrives from the forwarding mailbox,
+   not from `delta.com`. Trust the forwarding address you control. Trusting an
+   airline domain instead is the most common reason a working setup ingests
+   nothing. `doctor` flags that combination:
    `{baseDir}/clawflight config set mailbox.adapter imap`, then `mailbox.host`,
    `mailbox.username`, `mailbox.trusted_senders`, and the password by NAME:
    `openclaw config set skills.entries.clawflight.env.CLAWFLIGHT_IMAP_PASSWORD '<app-password>'`
@@ -158,6 +167,10 @@ openclaw cron create --name clawflight-sweep --cron "17 * * * *" \
 
 ## What it alerts on
 
+Confirmations are read from plain-text and HTML airline mail across the major US
+and international carriers, including multi-leg itineraries, schedule-change and
+cancellation notices, and records naming more than one passenger.
+
 Takeoff, halfway, landing and arrival; FAA ground stops and delay programmes;
 schedule changes and cancellations found in ingested email; tight and missed
 connections; a trip card at the start of a travel day.
@@ -175,9 +188,8 @@ Two behaviours worth explaining when they come up:
 
 | symptom | first move |
 |---|---|
-| nothing tracked | add one by hand: `flight add … --depart HH:MM`. If mail should be arriving, `sweep --dry-run` — is the sender in `trusted_senders`? |
+| nothing tracked | add one by hand: `flight add … --depart HH:MM`. If mail should be arriving, `sweep --dry-run` — is the sender in `trusted_senders`? For forwarded mail that is the FORWARDING address, not the airline. |
 | flight added but no alerts | it needs `--from` and `--depart`; without them the watch window never opens |
 | traveler shows "Unknown" | pass `--person <key>` when adding, or add the airline's spelling to `match_substrings` |
-| traveler shows "Unknown" | add the airline's spelling of the name to that person's `match_substrings` |
 | no messages arriving | `{baseDir}/clawflight doctor` — `openclaw` on PATH, and does the recipient have a `channel`? |
 | deliveries failing | `doctor` reports outbox failures; the outbox retries with backoff, so check the channel target first |
