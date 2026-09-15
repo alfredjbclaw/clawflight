@@ -14,7 +14,7 @@ from datetime import datetime
 from email.utils import parseaddr
 from typing import FrozenSet, Iterable, Optional, Tuple, Union
 
-from .parse import KNOWN_CARRIERS
+from .parse import KNOWN_CARRIERS, _time_to_iso
 
 
 MAX_BODY_CHARS = 256 * 1024
@@ -37,6 +37,12 @@ _FIELD_PATTERNS = {
     ),
     "destination": re.compile(
         r"(?im)^\s*(?:to|destination|arrival\s+airport)\s*:\s*(?P<value>[^\r\n]+?)\s*$"
+    ),
+    "departure_time": re.compile(
+        r"(?im)^\s*(?:departure|depart)\s+time\s*:\s*(?P<value>[^\r\n]+?)\s*$"
+    ),
+    "arrival_time": re.compile(
+        r"(?im)^\s*arrival\s+time\s*:\s*(?P<value>[^\r\n]+?)\s*$"
     ),
     "route": re.compile(r"(?im)^\s*route\s*:\s*(?P<value>[^\r\n]+?)\s*$"),
     "confirmation": re.compile(
@@ -181,6 +187,8 @@ class EmailItineraryCandidate:
     confirmation_code: str
     traveler: Optional[str]
     evidence: EmailEvidence
+    sched_dep_iso: Optional[str] = None
+    sched_arr_iso: Optional[str] = None
 
 
 def _one_field(text: str, field: str) -> Optional[str]:
@@ -333,6 +341,13 @@ def ingest_email(
                 confirmation_code=confirmation.upper(),
                 traveler=_bounded_identity(traveler, "traveler") if traveler else None,
                 evidence=evidence,
+                sched_dep_iso=_time_to_iso(
+                    service_date, _one_field(segment, "departure_time"), origin
+                ),
+                # Arrival clocks remain on the service date; overnight rollover is deferred.
+                sched_arr_iso=_time_to_iso(
+                    service_date, _one_field(segment, "arrival_time"), destination
+                ),
             )
         )
     return tuple(candidates)

@@ -48,6 +48,8 @@ def _email_candidate(
     source_id: str = "trip-1001@air.example",
     digest: str = "a" * 64,
     traveler: Optional[str] = "SAM KESTREL",
+    sched_dep_iso: Optional[str] = None,
+    sched_arr_iso: Optional[str] = None,
 ) -> EmailItineraryCandidate:
     return EmailItineraryCandidate(
         carrier="DL",
@@ -65,6 +67,8 @@ def _email_candidate(
             source_kind="email",
             digest=digest,
         ),
+        sched_dep_iso=sched_dep_iso,
+        sched_arr_iso=sched_arr_iso,
     )
 
 
@@ -143,6 +147,20 @@ def test_email_candidate_merges_as_a_scheduleless_durable_record(tmp_path, peopl
     # Provenance is an identifier and a digest — never the sender or the body.
     persisted = path.read_text(encoding="utf-8")
     assert "confirmations@air.example" not in persisted
+
+
+def test_email_candidate_schedule_is_carried_to_the_durable_record(registry) -> None:
+    candidate = _email_candidate(
+        sched_dep_iso="2026-08-19T16:55:00-04:00",
+        sched_arr_iso="2026-08-19T19:30:00-07:00",
+    )
+
+    registry.merge_email_candidates([candidate])
+
+    record = registry.get("DL248-2026-08-19")
+    assert record is not None
+    assert record.leg.sched_dep_iso == candidate.sched_dep_iso
+    assert record.leg.sched_arr_iso == candidate.sched_arr_iso
 
 
 def test_email_reingestion_is_idempotent(tmp_path, people) -> None:

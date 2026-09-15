@@ -1,4 +1,6 @@
 """Airline email layout parsing against the synthetic fixtures."""
+import pytest
+
 from clawflight.parse import parse_airline_email
 
 
@@ -27,8 +29,25 @@ def test_receipt_parses_each_day_and_deduplicates_repeated_flights(fixtures) -> 
         ("DL", 1226, "2026-05-14", "SJC", "LAX", "FAKEA1", "8C", "ROBIN J KESTREL"),
     ]
     assert sum(item.leg.number == 667 for item in flights) == 1
-    # Receipts carry no timezone-resolvable times, so the ISO fields stay empty.
-    assert all(item.leg.sched_dep_iso is None for item in flights)
+    assert flights[0].leg.sched_dep_iso == "2026-05-11T06:00:00-04:00"
+    assert flights[0].leg.sched_arr_iso == "2026-05-11T09:35:00-07:00"
+
+
+@pytest.mark.parametrize(
+    "departure_line",
+    ["6:00 XM SAN FRANCISCO", "garbage SAN FRANCISCO", "SAN FRANCISCO"],
+)
+def test_receipt_keeps_route_when_departure_time_is_bad_or_missing(
+    fixtures, departure_line
+) -> None:
+    text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    text = text.replace("6:00 AM SAN FRANCISCO", departure_line)
+
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert (flight.leg.number, flight.leg.origin, flight.leg.dest) == (667, "JFK", "SFO")
+    assert flight.leg.sched_dep_iso is None
+    assert flight.leg.sched_arr_iso == "2026-05-11T09:35:00-07:00"
 
 
 def test_receipt_keeps_a_leg_whose_city_is_unmapped(fixtures) -> None:
@@ -42,6 +61,8 @@ def test_receipt_keeps_a_leg_whose_city_is_unmapped(fixtures) -> None:
     assert flights[0].leg.number == 667
     assert flights[0].leg.origin is None
     assert flights[0].leg.dest == "SFO"
+    assert flights[0].leg.sched_dep_iso is None
+    assert flights[0].leg.sched_arr_iso == "2026-05-11T09:35:00-07:00"
 
 
 def test_trip_confirmation_parses_each_leg_with_seat_and_greeting(fixtures) -> None:
@@ -63,7 +84,22 @@ def test_trip_confirmation_parses_each_leg_with_seat_and_greeting(fixtures) -> N
         ("AA", 5134, "2026-02-27", "ITH", "CLT", "FAKEA2", "12A", "Sam Kestrel"),
         ("AA", 776, "2026-02-28", "CLT", "LAX", "FAKEA2", "4C", "Sam Kestrel"),
     ]
-    assert all(item.leg.sched_arr_iso is None for item in flights)
+    assert flights[0].leg.sched_dep_iso == "2026-02-27T07:45:00-05:00"
+    assert flights[0].leg.sched_arr_iso == "2026-02-27T10:20:00-05:00"
+
+
+@pytest.mark.parametrize("departure_time", ["7:45 XM", ""])
+def test_trip_confirmation_keeps_leg_when_departure_time_is_bad_or_missing(
+    fixtures, departure_time
+) -> None:
+    text = (fixtures / "email_aa_trip_confirmation.txt").read_text(encoding="utf-8")
+    text = text.replace("7:45 AM", departure_time, 1)
+
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert (flight.leg.number, flight.leg.origin, flight.leg.dest) == (5134, "ITH", "CLT")
+    assert flight.leg.sched_dep_iso is None
+    assert flight.leg.sched_arr_iso == "2026-02-27T10:20:00-05:00"
 
 
 def test_schedule_change_uses_only_the_new_itinerary(fixtures) -> None:
@@ -81,6 +117,22 @@ def test_schedule_change_uses_only_the_new_itinerary(fixtures) -> None:
         flights[0].leg.conf_code,
     ) == ("DL", 365, "2026-05-21", "JFK", "SFO", "FAKEA3")
     assert "your flight changed" in flights[0].hints["notes_excerpt"].lower()
+    assert flights[0].leg.sched_dep_iso == "2026-05-21T06:00:00-04:00"
+    assert flights[0].leg.sched_arr_iso == "2026-05-21T09:35:00-07:00"
+
+
+@pytest.mark.parametrize("departure_time", ["6:00 XM", ""])
+def test_schedule_change_keeps_new_leg_when_departure_time_is_bad_or_missing(
+    fixtures, departure_time
+) -> None:
+    text = (fixtures / "email_delta_schedule_change.txt").read_text(encoding="utf-8")
+    text = text.replace("6:00 AM", departure_time, 1)
+
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert (flight.leg.number, flight.leg.origin, flight.leg.dest) == (365, "JFK", "SFO")
+    assert flight.leg.sched_dep_iso is None
+    assert flight.leg.sched_arr_iso == "2026-05-21T09:35:00-07:00"
 
 
 def test_status_email_without_a_booking_is_ignored(fixtures) -> None:

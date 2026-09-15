@@ -21,6 +21,8 @@ Flight: DL 248
 Date: 2026-08-19
 From: JFK
 To: LAX
+Departure Time: 4:55 PM
+Arrival Time: 7:30 PM
 """
 
 
@@ -70,6 +72,8 @@ def test_trusted_message_produces_an_immutable_candidate_and_bounded_evidence() 
     )
     assert candidate.confirmation_code == "FAKE20"
     assert candidate.traveler == "ALEXANDRA MORGAN KESTREL"
+    assert candidate.sched_dep_iso == "2026-08-19T16:55:00-04:00"
+    assert candidate.sched_arr_iso == "2026-08-19T19:30:00-07:00"
     assert candidate.evidence.sender_identity == "confirmations@air.example"
     assert candidate.evidence.organizer_identity == "Travel Desk"
     assert candidate.evidence.observed_at is OBSERVED

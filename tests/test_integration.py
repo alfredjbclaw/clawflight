@@ -6,6 +6,7 @@ no network, credential, or clock dependency.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from clawflight.adapters.mailbox import messages_to_candidates
@@ -16,7 +17,7 @@ from clawflight.connections import connection_alerts
 from clawflight.models import FlightUpdate, Observation, Position
 from clawflight.monitor import Monitor
 from clawflight.notify import DeliveryOutbox, FakePoster, compose_trip_card
-from clawflight.parse import parse_calendar_events, parse_cancellations
+from clawflight.parse import parse_airline_email, parse_calendar_events, parse_cancellations
 from clawflight.recipients import FollowStore, resolve_recipients
 from clawflight.registry import BACKUP_NOTE, Registry
 from clawflight.runner import run_once
@@ -109,6 +110,52 @@ def test_a_same_day_pair_is_flagged_as_backups_not_deduplicated(
 
 
 # -- watching and delivery --------------------------------------------------
+
+
+def test_email_departure_time_is_the_difference_between_watched_and_never_watched(
+    tmp_path, people, fixtures
+) -> None:
+    parsed = parse_airline_email(
+        (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8"), 2026
+    )
+    registry = Registry(str(tmp_path / "email-registry.json"), people)
+    registry.merge([parsed[0]])
+    scheduled = registry.get("DL667-2026-05-11")
+    assert scheduled is not None
+    departure = datetime.fromisoformat(scheduled.leg.sched_dep_iso).timestamp()
+    ticks = (departure - 8 * 3600, departure - 2 * 3600, departure + 8 * 3600)
+
+    monitor = Monitor(str(tmp_path / "timed-monitor.json"))
+    timed_events_by_tick = []
+    for now in ticks:
+        timed_events_by_tick.append(
+            monitor.assess(
+                scheduled,
+                Observation(scheduled.flight_id, None, None, None, now),
+                default_airports(),
+                now,
+            )
+        )
+    assert timed_events_by_tick[0] == []
+    assert [(event.kind, event.at_epoch) for event in timed_events_by_tick[1]] == [
+        ("tracking_started", departure - 2 * 3600)
+    ]
+    assert monitor.state_snapshot()[scheduled.flight_id]["phase"] == "watch"
+
+    untimed = replace(scheduled, leg=replace(scheduled.leg, sched_dep_iso=None))
+    monitor = Monitor(str(tmp_path / "untimed-monitor.json"))
+    untimed_events = []
+    for now in ticks:
+        untimed_events.extend(
+            monitor.assess(
+                untimed,
+                Observation(untimed.flight_id, None, None, None, now),
+                default_airports(),
+                now,
+            )
+        )
+    assert untimed_events == []
+    assert monitor.state_snapshot()[untimed.flight_id]["phase"] == "scheduled"
 
 
 def test_a_travel_day_produces_a_trip_card_for_each_traveler(

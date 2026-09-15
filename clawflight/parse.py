@@ -193,17 +193,24 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
                 else len(section)
             )
             details = section[flight.end() : flight_end]
-            route = re.search(
-                r"(?im)^\s*(?:Standby\s+)?([A-Z][A-Z -]*?)\s*$\s*"
-                r"^\s*\d{1,2}:\d{2}\s*(?:AM|PM)\s+([A-Z][A-Z -]*?)\s*$\s*"
-                r"^\s*\d{1,2}:\d{2}\s*(?:AM|PM)\s*$",
-                details,
+            lines = [line.strip() for line in details.splitlines() if line.strip()]
+            origin_match = re.fullmatch(
+                r"(?:Standby\s+)?(?P<origin>[A-Z][A-Z -]*?)", lines[0], re.IGNORECASE
+            ) if lines else None
+            dep_field, destination = (
+                _receipt_destination_line(lines[1]) if len(lines) > 1 else (None, None)
             )
-            origin = _airline_email_city(route.group(1)) if route else None
-            dest = _airline_email_city(route.group(2)) if route else None
+            origin = (
+                _airline_email_city(origin_match.group("origin"))
+                if origin_match else None
+            )
+            dest = _airline_email_city(destination) if destination else None
+            dep_time = _clock_value(dep_field)
+            arr_time = _clock_value(lines[2]) if len(lines) > 2 else None
             parsed.append(
                 _airline_parsed_flight(
                     "DL", number, date, origin, dest,
+                    dep_time, arr_time,
                     confirmation.group(1).upper(), seats.get(number), hints,
                 )
             )
@@ -243,10 +250,11 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
         if carrier is None:
             continue
         prefix = block[: carrier.start()]
-        airports = re.findall(r"(?im)^\s*([A-Z]{3})\s*$", prefix)
-        times = TIME_RE.findall(prefix)
-        if len(airports) < 2 or len(times) < 2:
+        airports = list(re.finditer(r"(?im)^\s*([A-Z]{3})\s*$", prefix))
+        if len(airports) < 2:
             continue
+        dep_time = _clock_in(prefix[airports[0].end() : airports[1].start()])
+        arr_time = _clock_in(prefix[airports[1].end() :])
         try:
             date = datetime.strptime(
                 "{} {} {}".format(
@@ -262,7 +270,9 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
         )
         parsed.append(
             _airline_parsed_flight(
-                "AA", int(carrier.group(2)), date, airports[0], airports[1],
+                "AA", int(carrier.group(2)), date,
+                airports[0].group(1), airports[1].group(1),
+                dep_time, arr_time,
                 confirmation.group(1).upper(),
                 seat_match.group(1).upper() if seat_match else None,
                 hints,
@@ -280,33 +290,68 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
         return []
     # The first block after the heading is the replacement itinerary. Later
     # blocks restate the original one and must never become a second flight.
-    block = re.search(
-        r"(?im)^\s*(Delta)\s+(\d{1,4})\s*$\s*"
-        r"^\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*([A-Z][a-z]+)\s+(\d{1,2})\s*$\s*"
-        r"^\s*([A-Za-z][A-Za-z -]+?)\s*$\s*"
-        r"^\s*(\d{1,2}:\d{2}\s*(?:AM|PM))\s*$\s*"
-        r"^\s*([A-Za-z][A-Za-z -]+?)\s*$\s*"
-        r"^\s*(\d{1,2}:\d{2}\s*(?:AM|PM))\s*$",
-        text[new_info.end() :],
+    new_section = text[new_info.end() :]
+    original_info = re.search(r"\bYour Original Flight Info\b", new_section, re.IGNORECASE)
+    if original_info:
+        new_section = new_section[: original_info.start()]
+    heading = re.search(
+        r"(?im)^\s*(?P<carrier>Delta)\s+(?P<number>\d{1,4})\s*$\s*"
+        r"^\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*"
+        r"(?P<month>[A-Z][a-z]+)\s+(?P<day>\d{1,2})\s*$",
+        new_section,
     )
-    if block is None:
+    if heading is None:
         return []
+    route_text = new_section[heading.end() :]
+    cities = list(
+        re.finditer(r"(?im)^\s*([A-Za-z][A-Za-z -]+?)\s*$", route_text)
+    )
+    if len(cities) < 2:
+        return []
+    dep_time = _clock_in(route_text[cities[0].end() : cities[1].start()])
+    arr_time = _clock_in(route_text[cities[1].end() :])
     try:
         date = datetime.strptime(
-            "{} {} {}".format(block.group(3), block.group(4), default_year),
+            "{} {} {}".format(heading.group("month"), heading.group("day"), default_year),
             "%B %d %Y",
         ).date().isoformat()
     except (OverflowError, ValueError):
         return []
     return [
         _airline_parsed_flight(
-            "DL", int(block.group(2)), date,
-            _airline_email_city(block.group(5)),
-            _airline_email_city(block.group(7)),
+            "DL", int(heading.group("number")), date,
+            _airline_email_city(cities[0].group(1)),
+            _airline_email_city(cities[1].group(1)),
+            dep_time, arr_time,
             confirmation.group(1).upper(), None,
             {"notes_excerpt": "Your flight changed"},
         )
     ]
+
+
+def _clock_value(value: "Optional[str]") -> "Optional[str]":
+    if value is None:
+        return None
+    match = TIME_RE.fullmatch(value.strip())
+    return match.group(1) if match else None
+
+
+def _receipt_destination_line(
+    value: str,
+) -> "tuple[Optional[str], Optional[str]]":
+    """Split the known destination suffix without interpreting the preceding clock."""
+    normalized = value.strip()
+    for city in sorted(AIRLINE_EMAIL_CITY_TO_IATA, key=len, reverse=True):
+        match = re.search(r"(?:^|\s)({})$".format(re.escape(city)), normalized, re.IGNORECASE)
+        if match:
+            preceding = normalized[: match.start()].strip()
+            return preceding or None, match.group(1)
+    return None, None
+
+
+def _clock_in(value: str) -> "Optional[str]":
+    match = TIME_RE.search(value)
+    return match.group(1) if match else None
 
 
 def _airline_email_city(value: str) -> "Optional[str]":
@@ -320,6 +365,8 @@ def _airline_parsed_flight(
     date: str,
     origin: "Optional[str]",
     dest: "Optional[str]",
+    dep_time: "Optional[str]",
+    arr_time: "Optional[str]",
     conf_code: "Optional[str]",
     seat: "Optional[str]",
     hints: dict,
@@ -331,8 +378,9 @@ def _airline_parsed_flight(
             date=date,
             origin=origin,
             dest=dest,
-            sched_dep_iso=None,
-            sched_arr_iso=None,
+            sched_dep_iso=_time_to_iso(date, dep_time, origin),
+            # Arrival clocks remain on the service date; overnight rollover is deferred.
+            sched_arr_iso=_time_to_iso(date, arr_time, dest),
             conf_code=conf_code,
             seat=seat,
         ),
