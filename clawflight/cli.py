@@ -15,6 +15,7 @@ import argparse
 import json
 import shlex
 import shutil
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,19 +23,24 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from . import __version__
 from .adapters.channel_openclaw import DEFAULT_BINARY, binary_available, poster_router
-from .adapters.mailbox import messages_to_candidates, messages_to_parsed_flights
+from .adapters.mailbox import (
+    messages_to_candidates,
+    messages_to_cancellations,
+    messages_to_parsed_flights,
+)
 from .adapters.feed_adsb import PublicFeeds, offline_observer
 from .adapters.mailbox_mbox import MboxAdapter
 from .airports import AIRPORTS_CSV, default_airports
 from .audit import run_audit
 from .config import Config, ConfigError, load_config, validate, with_state_dir
 from . import manage
-from .models import FlightRecord
+from .models import FlightEvent, FlightRecord
 from .monitor import Monitor
 from .notify import DeliveryOutbox, FakePoster
 from .recipients import FollowStore, resolve_recipients
 from .registry import Registry
 from .runner import run_once
+from .webhook_receiver import SECRET_ENV, make_server_from_env, push_handler
 
 
 TICK_CRON = "*/2 * * * *"
@@ -81,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--mailbox", help="override the mailbox source, e.g. mbox:fixtures/inbox.mbox"
     )
     sweep.add_argument("--now", type=float, help="override the current epoch (testing)")
+
+    serve = subparsers.add_parser("serve", help="run the loopback push receiver")
+    serve.add_argument(
+        "--port", type=int, default=8787, help="loopback port (default: 8787)"
+    )
 
     subparsers.add_parser("status", help="show tracked flights")
 
@@ -189,6 +200,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "setup": _cmd_setup,
         "tick": _cmd_tick,
         "sweep": _cmd_sweep,
+        "serve": _cmd_serve,
         "status": _cmd_status,
         "follow": _cmd_follow,
         "unfollow": _cmd_follow,
@@ -355,7 +367,21 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
     outbox = DeliveryOutbox(str(config.outbox_path))
 
     adapter = _mailbox_adapter(args.mailbox, config)
-    ingested = {"candidates": 0, "legs": 0, "skipped": 0, "created": [], "updated": []}
+    ingested = {
+        "candidates": 0,
+        "legs": 0,
+        "skipped": 0,
+        "created": [],
+        "updated": [],
+        "unresolved_airports": [],
+    }
+    cancellations = {
+        "codes": [],
+        "affected": [],
+        "unmatched": [],
+        "ignored": [],
+        "errors": [],
+    }
     if adapter is not None:
         messages = adapter.fetch(config.mailbox.max_messages)
         trusted = config.mailbox.trusted_senders
@@ -363,6 +389,15 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
         parsed = messages_to_parsed_flights(
             messages, trusted, _year_of(now)
         )
+        for message in messages:
+            try:
+                for code in messages_to_cancellations(
+                    [message], trusted, _year_of(now)
+                ):
+                    if code not in cancellations["codes"]:
+                        cancellations["codes"].append(code)
+            except Exception:  # noqa: BLE001 - report one bad message and continue
+                cancellations["errors"].append(message.source_id)
         ingested["candidates"] = len(candidates)
         ingested["legs"] = len(parsed)
         ingested["skipped"] = len(skipped)
@@ -370,13 +405,59 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
             report = registry.merge_email_candidates(candidates)
             ingested["created"].extend(report["created"])
             ingested["updated"].extend(report["updated"])
+            ingested["unresolved_airports"].extend(
+                report.get("unresolved_airports", [])
+            )
         if parsed:
             report = registry.merge(parsed)
             ingested["created"].extend(report["created"])
             ingested["updated"].extend(report["updated"])
+            ingested["unresolved_airports"].extend(
+                report.get("unresolved_airports", [])
+            )
+
+        store = FollowStore(str(config.follows_path))
+        for code in cancellations["codes"]:
+            changed = registry.set_status_by_conf(code, "cancelled")
+            if not changed:
+                target = (
+                    cancellations["ignored"]
+                    if getattr(changed, "matched", False)
+                    else cancellations["unmatched"]
+                )
+                target.append(code)
+                continue
+            for flight_id in changed:
+                record = registry.get(flight_id)
+                if record is None:
+                    continue
+                cancellations["affected"].append(flight_id)
+                event = FlightEvent(
+                    flight_id,
+                    "cancelled",
+                    "{}{} has been cancelled.".format(
+                        record.leg.carrier, record.leg.number
+                    ),
+                    True,
+                    now,
+                )
+                recipients = [
+                    recipient.key
+                    for recipient in resolve_recipients(
+                        record, config.recipients, store
+                    )
+                ]
+                outbox.enqueue_for(event, record, recipients)
+
+    ingested["unresolved_airports"] = list(
+        dict.fromkeys(ingested["unresolved_airports"])
+    )
 
     promoted = []
     for flight_id in monitor.landed_awaiting_done(now):
+        record = registry.get(flight_id)
+        if record is not None and record.status in ("done", "cancelled"):
+            continue
         registry.set_status(flight_id, "done")
         promoted.append(flight_id)
     pruned_records = registry.prune_done(now)
@@ -393,6 +474,7 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
 
     payload = {
         "ingested": ingested,
+        "cancellations": cancellations,
         "promoted": promoted,
         "pruned": {
             "records": pruned_records,
@@ -402,6 +484,56 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
         "delivery": delivery,
     }
     _emit(args, payload, json.dumps(payload, sort_keys=True))
+    return 0
+
+
+def _cmd_serve(args: argparse.Namespace, config: Config) -> int:
+    """Run the loopback webhook receiver in the foreground."""
+    config.ensure_state_dir()
+
+    class LiveRegistry:
+        def matching_bookings(self, update):
+            # Sweep and serve are separate long-running processes. Reload for
+            # every request so a receiver started first sees later mail ingest.
+            return Registry(
+                str(config.registry_path), config.people
+            ).matching_bookings(update)
+
+    registry = LiveRegistry()
+    monitor = Monitor(str(config.monitor_path))
+    outbox = DeliveryOutbox(str(config.outbox_path))
+    store = FollowStore(str(config.follows_path))
+    handler = push_handler(
+        config,
+        monitor,
+        outbox,
+        registry,
+        store,
+        poster_router(config.recipients),
+    )
+    try:
+        server = make_server_from_env(args.port, handler)
+    except ValueError:
+        _emit(
+            args,
+            {"ok": False, "error": "{} is required".format(SECRET_ENV)},
+            "error: set {} before running clawflight serve".format(SECRET_ENV),
+        )
+        return 2
+
+    previous_term = signal.getsignal(signal.SIGTERM)
+
+    def stop(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
+        server.server_close()
     return 0
 
 

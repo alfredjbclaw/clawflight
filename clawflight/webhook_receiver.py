@@ -11,11 +11,14 @@ import hmac
 import json
 import logging
 import os
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Type
 
 from .aerodatabox import normalize_notification
 from .models import FlightUpdate
+from .notify import FakePoster
+from .recipients import resolve_recipients
 
 
 MAX_BODY_BYTES = 1024 * 1024
@@ -24,6 +27,43 @@ SECRET_ENV = "CLAWFLIGHT_WEBHOOK_SECRET"
 PATH_PREFIX_ENV = "CLAWFLIGHT_WEBHOOK_PATH_PREFIX"
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def push_handler(
+    config, monitor, outbox, registry, store, poster_for
+) -> Callable[[FlightUpdate], None]:
+    """Build the isolated update-to-delivery callback used by ``serve``.
+
+    The HTTP layer owns request authentication and retry responses. This
+    callback owns the same durable monitor/outbox path as a poll tick. It is
+    independent of the server so tests can drive it without a socket.
+    """
+
+    def on_update(update: FlightUpdate) -> None:
+        try:
+            records = [
+                record
+                for record in registry.matching_bookings(update)
+                if record.status not in ("done", "cancelled")
+            ]
+            if not records:
+                return
+            now_epoch = time.time()
+            events = monitor.ingest_push(update, now_epoch)
+            for record in records:
+                recipients = [
+                    recipient.key
+                    for recipient in resolve_recipients(
+                        record, config.recipients, store
+                    )
+                ]
+                for event in events:
+                    outbox.enqueue_for(event, record, recipients)
+            outbox.deliver_pending(FakePoster(), now_epoch, poster_for=poster_for)
+        except Exception:  # noqa: BLE001 - one update must not stop the receiver
+            _LOGGER.exception("clawflight push update failed")
+
+    return on_update
 
 
 def make_server(

@@ -12,6 +12,7 @@ from clawflight.adapters.mailbox import (
     extract_text_body,
     message_from_bytes,
     messages_to_candidates,
+    messages_to_cancellations,
     messages_to_parsed_flights,
 )
 from clawflight.adapters.mailbox_imap import ImapAdapter, ImapConfigError
@@ -199,6 +200,22 @@ def test_an_explicit_policy_object_is_accepted_by_both_pipelines(fixtures) -> No
         ("UA", 410, "EWR", "ORD"),
         ("UA", 882, "ORD", "SFO"),
     ]
+
+
+def test_cancellations_are_harvested_only_from_trusted_explicit_notices() -> None:
+    trusted = _message(body="Your booking has been cancelled. Confirmation: FAKE20")
+    duplicate = _message(body="Cancellation confirmed. Confirmation: FAKE20")
+    untrusted = _message(
+        sender="notices@air.example.evil.test",
+        body="Your booking has been cancelled. Confirmation: FAKE21",
+    )
+    boilerplate = _message(
+        body="Confirmation: FAKE22\nYour fare has a risk free cancellation period."
+    )
+
+    assert messages_to_cancellations(
+        [trusted, duplicate, untrusted, boilerplate], TRUSTED, 2026
+    ) == ["FAKE20"]
 
 
 # -- the IMAP adapter -------------------------------------------------------

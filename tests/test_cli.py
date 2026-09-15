@@ -67,8 +67,28 @@ def test_every_documented_verb_is_available() -> None:
     verbs = set(subparsers[0].choices)
 
     assert {
-        "setup", "tick", "sweep", "status", "follow", "unfollow", "mute", "unmute", "doctor"
+        "setup", "tick", "sweep", "serve", "status", "follow", "unfollow", "mute", "unmute", "doctor"
     } <= verbs
+
+
+def test_serve_without_the_named_secret_is_one_clean_error(tmp_path, capsys, monkeypatch) -> None:
+    monkeypatch.delenv("CLAWFLIGHT_WEBHOOK_SECRET", raising=False)
+    path = _write_config(tmp_path)
+
+    code, out = _run(capsys, "--config", str(path), "serve")
+
+    assert code != 0
+    assert out.splitlines() == [
+        "error: set CLAWFLIGHT_WEBHOOK_SECRET before running clawflight serve"
+    ]
+
+
+def test_serve_help_lists_the_loopback_port(capsys) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["serve", "--help"])
+
+    assert exit_info.value.code == 0
+    assert "--port" in capsys.readouterr().out
 
 
 def test_no_command_prints_help_and_exits_non_zero(capsys) -> None:
@@ -298,6 +318,212 @@ def test_sweep_promotes_landed_flights_and_prunes_state(tmp_path, capsys) -> Non
     # The orphaned state is then pruned because the registry never knew it.
     assert payload["pruned"]["monitor"] == ["DL999-2026-01-01"]
     assert Monitor(str(config.monitor_path)).state_snapshot() == {}
+
+
+def _seed_cancellable(tmp_path, config_path, *, status="scheduled", conf="FAKE55"):
+    from clawflight.models import FlightLeg
+    from clawflight.parse import ParsedFlight
+
+    config = load_config(config_path)
+    config.ensure_state_dir()
+    registry = Registry(str(config.registry_path), config.people)
+    registry.merge([
+        ParsedFlight(
+            FlightLeg(
+                "AA", 4912, "2026-08-19", "DEN", "ORD",
+                "2026-08-19T12:00:00-06:00", None, conf, None,
+            ),
+            {"source_id": "mail:synthetic-booking", "passenger_name": "ALEX KESTREL"},
+        )
+    ])
+    registry.set_status("AA4912-2026-08-19", status)
+    return config
+
+
+def _cancellation_mailbox(tmp_path, *, sender="updates@air.example", body=None):
+    drop = tmp_path / "cancel-mail"
+    drop.mkdir()
+    (drop / "notice.eml").write_text(
+        "From: {}\nMessage-ID: <cancel-55@air.example>\nSubject: Update\n\n{}\n".format(
+            sender,
+            body or "Your booking has been cancelled. Confirmation: FAKE55",
+        ),
+        encoding="utf-8",
+    )
+    return drop
+
+
+def _cancellation_config(tmp_path, drop):
+    return _write_config(
+        tmp_path,
+        mailbox={
+            "adapter": "mbox", "path": str(drop),
+            "trusted_senders": ["air.example"],
+        },
+    )
+
+
+def test_sweep_cancels_once_delivers_once_and_later_tick_is_silent(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    from clawflight import cli
+    from clawflight.notify import FakePoster
+
+    path = _cancellation_config(tmp_path, _cancellation_mailbox(tmp_path))
+    config = _seed_cancellable(tmp_path, path)
+    poster = FakePoster()
+    monkeypatch.setattr(cli, "poster_router", lambda recipients: lambda key: poster)
+
+    code, first = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--now", str(NOW)
+    )
+    _, second = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--now", str(NOW + 60)
+    )
+    _, tick = _json_run(
+        capsys, "--config", str(path), "--json", "tick", "--offline",
+        "--now", str(NOW + 120),
+    )
+
+    flight_id = "AA4912-2026-08-19"
+    assert code == 0
+    assert first["cancellations"]["affected"] == [flight_id]
+    assert Registry(str(config.registry_path), config.people).get(flight_id).status == "cancelled"
+    assert len(poster.calls) == 1
+    assert "AA4912 has been cancelled" in poster.calls[0]
+    assert second["cancellations"]["affected"] == []
+    assert tick["events"] == []
+
+
+def test_sweep_ignores_cancellation_from_an_untrusted_sender(tmp_path, capsys) -> None:
+    drop = _cancellation_mailbox(tmp_path, sender="updates@air.example.evil.test")
+    path = _cancellation_config(tmp_path, drop)
+    config = _seed_cancellable(tmp_path, path)
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    record = Registry(str(config.registry_path), config.people).get("AA4912-2026-08-19")
+    assert payload["cancellations"]["codes"] == []
+    assert record.status == "scheduled"
+
+
+def test_sweep_reports_a_cancellation_code_that_matches_nothing(tmp_path, capsys) -> None:
+    path = _cancellation_config(tmp_path, _cancellation_mailbox(tmp_path))
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    assert payload["cancellations"]["unmatched"] == ["FAKE55"]
+    assert payload["cancellations"]["affected"] == []
+
+
+def test_sweep_does_not_move_a_done_record_to_cancelled(tmp_path, capsys) -> None:
+    path = _cancellation_config(tmp_path, _cancellation_mailbox(tmp_path))
+    config = _seed_cancellable(tmp_path, path, status="done")
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    record = Registry(str(config.registry_path), config.people).get("AA4912-2026-08-19")
+    assert payload["cancellations"]["ignored"] == ["FAKE55"]
+    assert record.status == "done"
+
+
+def test_sweep_cancels_active_leg_when_same_code_has_a_done_leg(
+    tmp_path, capsys
+) -> None:
+    from clawflight.models import FlightLeg
+    from clawflight.parse import ParsedFlight
+
+    path = _cancellation_config(tmp_path, _cancellation_mailbox(tmp_path))
+    config = _seed_cancellable(tmp_path, path, status="done")
+    registry = Registry(str(config.registry_path), config.people)
+    registry.merge([
+        ParsedFlight(
+            FlightLeg(
+                "AA", 1203, "2026-08-19", "ORD", "BOS",
+                "2026-08-19T16:00:00-05:00", None, "FAKE55", None,
+            ),
+            {"source_id": "mail:synthetic-connection", "passenger_name": "ALEX KESTREL"},
+        )
+    ])
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    current = Registry(str(config.registry_path), config.people)
+    assert payload["cancellations"]["affected"] == ["AA1203-2026-08-19"]
+    assert current.get("AA4912-2026-08-19").status == "done"
+    assert current.get("AA1203-2026-08-19").status == "cancelled"
+
+
+def test_sweep_does_not_promote_a_newly_cancelled_landed_record(
+    tmp_path, capsys
+) -> None:
+    path = _cancellation_config(tmp_path, _cancellation_mailbox(tmp_path))
+    config = _seed_cancellable(tmp_path, path)
+    config.monitor_path.write_text(json.dumps({
+        "AA4912-2026-08-19": {
+            "phase": "landed",
+            "landed_epoch": NOW - 7200,
+            "flight_number": "AA4912",
+        }
+    }), encoding="utf-8")
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    record = Registry(str(config.registry_path), config.people).get("AA4912-2026-08-19")
+    assert payload["cancellations"]["affected"] == ["AA4912-2026-08-19"]
+    assert payload["promoted"] == []
+    assert record.status == "cancelled"
+
+
+def test_sweep_does_not_treat_fare_rules_as_a_cancellation(tmp_path, capsys) -> None:
+    drop = _cancellation_mailbox(
+        tmp_path,
+        body="Confirmation: FAKE55\nThis fare has a risk free cancellation period.",
+    )
+    path = _cancellation_config(tmp_path, drop)
+    config = _seed_cancellable(tmp_path, path)
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    record = Registry(str(config.registry_path), config.people).get("AA4912-2026-08-19")
+    assert payload["cancellations"]["codes"] == []
+    assert record.status == "scheduled"
+
+
+def test_sweep_surfaces_unresolved_airports_from_the_real_merge_report(
+    tmp_path, capsys
+) -> None:
+    drop = tmp_path / "unresolved-mail"
+    drop.mkdir()
+    (drop / "receipt.eml").write_text(
+        "From: notices@air.example\n"
+        "Message-ID: <route-55@air.example>\n"
+        "Subject: Receipt\n\n"
+        "Confirmation: FAKEM1\n"
+        "Date: 2026-08-19\n"
+        "Flight: Delta 248\n"
+        "Route: ZZZ -> LAX\n",
+        encoding="utf-8",
+    )
+    path = _cancellation_config(tmp_path, drop)
+
+    _, payload = _json_run(
+        capsys, "--config", str(path), "--json", "sweep", "--dry-run", "--now", str(NOW)
+    )
+
+    assert payload["ingested"]["unresolved_airports"] == ["ZZZ"]
 
 
 # -- status, follow, mute ---------------------------------------------------

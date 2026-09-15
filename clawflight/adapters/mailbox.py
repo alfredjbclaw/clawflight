@@ -8,6 +8,7 @@ drop directory. Two adapters ship: ``mailbox_mbox`` (offline file drop) and
 from __future__ import annotations
 
 import email
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,10 +26,16 @@ from ..email_ingest import (
     TrustedSenderPolicy,
     ingest_email,
 )
-from ..parse import ParsedFlight, parse_airline_email
+from ..parse import (
+    ParsedFlight,
+    parse_airline_email,
+    parse_cancellation,
+    parse_cancellations,
+)
 
 
 MAX_BODY_CHARS = 256 * 1024
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -131,6 +138,45 @@ def messages_to_parsed_flights(
             hints.setdefault("source_id", "mail:{}".format(bounded.source_id))
             parsed.append(ParsedFlight(leg=flight.leg, hints=hints))
     return parsed
+
+
+def messages_to_cancellations(
+    messages: Iterable[MailboxMessage],
+    trusted_sources: Union[TrustedSenderPolicy, Iterable[str]],
+    default_year: int,
+) -> List[str]:
+    """Return cancellation confirmation codes from trusted messages only."""
+    policy = (
+        trusted_sources
+        if isinstance(trusted_sources, TrustedSenderPolicy)
+        else TrustedSenderPolicy.from_sources(trusted_sources)
+    )
+    codes: List[str] = []
+    for message in messages:
+        bounded = message.bounded()
+        if not policy.trusts(bounded.sender):
+            continue
+        found: List[str] = []
+        try:
+            direct = parse_cancellation(bounded.body)
+            if direct:
+                found.append(direct)
+        except Exception:  # noqa: BLE001 - one malformed message must not abort a sweep
+            _LOGGER.warning(
+                "cancellation parser rejected a mailbox message",
+                extra={"source_id": bounded.source_id},
+            )
+        try:
+            found.extend(parse_cancellations(bounded.body, default_year))
+        except Exception:  # noqa: BLE001 - a bad event block must not lose a direct match
+            _LOGGER.warning(
+                "calendar cancellation parser rejected a mailbox message",
+                extra={"source_id": bounded.source_id},
+            )
+        for code in found:
+            if code not in codes:
+                codes.append(code)
+    return codes
 
 
 # --------------------------------------------------------------------------

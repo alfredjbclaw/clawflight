@@ -556,6 +556,25 @@ def test_set_status_by_conf_updates_the_matching_itinerary(registry) -> None:
     assert registry.set_status_by_conf("", "cancelled") == []
 
 
+def test_set_status_by_conf_preserves_terminal_legs_and_cancels_active_siblings(
+    registry,
+) -> None:
+    registry.merge([
+        _parsed("AA", 4912, "2026-07-16", "one", conf_code="FAKE06"),
+        _parsed("AA", 1203, "2026-07-16", "two", conf_code="FAKE06"),
+        _parsed("AA", 881, "2026-07-16", "three", conf_code="FAKE06"),
+    ])
+    registry.set_status("AA4912-2026-07-16", "done")
+    registry.set_status("AA1203-2026-07-16", "cancelled")
+
+    changed = registry.set_status_by_conf("FAKE06", "cancelled")
+
+    assert changed == ["AA881-2026-07-16"]
+    assert registry.get("AA4912-2026-07-16").status == "done"
+    assert registry.get("AA1203-2026-07-16").status == "cancelled"
+    assert registry.get("AA881-2026-07-16").status == "cancelled"
+
+
 def test_set_status_for_update_applies_to_every_matching_booking(registry) -> None:
     registry.merge(
         [

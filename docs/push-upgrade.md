@@ -48,6 +48,7 @@ public — including into an issue report.
 ```sh
 python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 openclaw config set skills.entries.clawflight.env.CLAWFLIGHT_WEBHOOK_SECRET '<secret>'
+export CLAWFLIGHT_WEBHOOK_SECRET='<secret>'
 ```
 
 The receiver compares it in constant time and answers `404` to everything else.
@@ -56,6 +57,14 @@ The receiver compares it in constant time and answers `404` to everything else.
 
 The receiver binds `127.0.0.1` only — always, with no option to change it. To
 reach it, the vendor needs ingress you provide. Pick one:
+
+Start the receiver in its own foreground session before starting the tunnel:
+
+```sh
+clawflight serve
+```
+
+Use `clawflight serve --port 8787` to select the loopback port explicitly.
 
 **Cloudflare Tunnel** — no inbound firewall change, survives a dynamic IP.
 
@@ -70,7 +79,8 @@ tailscale funnel 8787
 ```
 
 **Your own reverse proxy** — terminate TLS and proxy to `127.0.0.1:8787`. If
-your ingress preserves a path prefix, set `push.path_prefix` to match; the
+your ingress preserves a path prefix, export `CLAWFLIGHT_WEBHOOK_PATH_PREFIX`
+with that prefix before starting the receiver; the
 receiver accepts `<prefix>/hook/<secret>` and answers `/healthz` either way.
 
 Whatever you choose, the public URL must be **HTTPS**. The secret is in the

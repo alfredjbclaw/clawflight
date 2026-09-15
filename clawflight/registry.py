@@ -34,6 +34,19 @@ _SOURCE_PREFIXES = ("cal:", "mail:", "email:", "manual:")
 _DEFAULT_SOURCE_PREFIX = "cal:"
 
 
+class StatusChangeIds(list):
+    """Changed flight ids plus whether the confirmation code existed.
+
+    The value remains a list for existing callers.  ``matched`` lets ingestion
+    report a known, terminal booking separately from an unknown code without a
+    second confirmation-code lookup.
+    """
+
+    def __init__(self, values=(), *, matched: bool = False) -> None:
+        super().__init__(values)
+        self.matched = matched
+
+
 def extract_service_date(update) -> Optional[str]:
     """Return the valid service date carried by a vendor update, if any."""
     for source in (getattr(update, "service_date", None), update.departure_scheduled):
@@ -245,15 +258,20 @@ class Registry:
         with self._cross_process_lock():
             target = (conf_code or "").strip().upper()
             if not target:
-                return []
+                return StatusChangeIds()
             changed: List[str] = []
+            matched = False
             for flight_id, record in list(self._records.items()):
-                if record.leg.conf_code == target and record.status != status:
-                    self._records[flight_id] = replace(record, status=status)
-                    changed.append(flight_id)
+                if record.leg.conf_code != target:
+                    continue
+                matched = True
+                if record.status in _TERMINAL_STATUSES or record.status == status:
+                    continue
+                self._records[flight_id] = replace(record, status=status)
+                changed.append(flight_id)
             if changed:
                 self._write()
-            return changed
+            return StatusChangeIds(changed, matched=matched)
 
     def forget(self, flight_id: str) -> bool:
         """Drop one record outright.
