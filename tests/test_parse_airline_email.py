@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from clawflight.models import FlightRecord, Observation, PersonRef, polling_callsign
+from clawflight.models import Observation, polling_callsign
 from clawflight.monitor import Monitor
 from clawflight.parse import (
     AIRLINE_EMAIL_CITY_TO_IATA,
@@ -13,6 +13,7 @@ from clawflight.parse import (
     parse_airline_email,
 )
 from clawflight.airports import default_airports
+from clawflight.registry import Registry
 
 
 def _parse(fixtures, name, year=2026):
@@ -76,18 +77,61 @@ def test_every_timed_generic_fixture_carries_its_departure_clock(
     assert flight.leg.sched_dep_iso == expected_departure
 
 
-def test_generic_email_enters_watch_at_two_hours_before_departure(fixtures, tmp_path) -> None:
-    parsed = _parse(fixtures, "email_jetblue_generic.txt")[0]
-    record = FlightRecord(
-        flight_id="B6611-2026-10-03",
-        leg=parsed.leg,
-        person=PersonRef("unknown", "Unknown"),
-        sources=("mail:synthetic-generic",),
-        backup_group=None,
-        status="scheduled",
-        notes=(),
-    )
-    departure = datetime.fromisoformat(parsed.leg.sched_dep_iso).timestamp()
+@pytest.mark.parametrize(
+    ("kind", "label"),
+    [
+        *[("departure", label + colon) for label in (
+            "Departs", "Departing", "Departure", "Departure time",
+            "Depart", "Dep", "Leaves",
+        ) for colon in ("", ":")],
+        *[("arrival", label + colon) for label in (
+            "Arrives", "Arriving", "Arrival", "Arrival time",
+            "Arrive", "Arr", "Reaches",
+        ) for colon in ("", ":")],
+    ],
+)
+def test_generic_email_accepts_every_time_label_with_or_without_colon(
+    kind, label
+) -> None:
+    departure_line = "Departs: 8:40 AM"
+    arrival_line = "Arrives: 11:55 AM"
+    if kind == "departure":
+        departure_line = "{} 8:40 AM".format(label)
+    else:
+        arrival_line = "{} 11:55 AM".format(label)
+    text = "\n".join([
+        "Confirmation: FAKEL1",
+        "Travel Date: 2026-10-03",
+        "Flight: JetBlue 611",
+        "Route: BOS -> LAX",
+        departure_line,
+        arrival_line,
+    ])
+
+    flight = parse_airline_email(text, 2026)[0].leg
+
+    assert flight.sched_dep_iso == "2026-10-03T08:40:00-04:00"
+    assert flight.sched_arr_iso == "2026-10-03T11:55:00-07:00"
+
+
+@pytest.mark.parametrize("departure_label", ["Departing:", "Dep:", "Departure:", "Leaves:"])
+def test_generic_email_with_departure_label_reaches_watch(
+    tmp_path, people, departure_label
+) -> None:
+    text = "\n".join([
+        "Passenger: Alex Kestrel",
+        "Confirmation: FAKEW1",
+        "Travel Date: 2026-10-03",
+        "Flight: JetBlue 611",
+        "Route: BOS -> LAX",
+        "{} 8:40 AM".format(departure_label),
+        "Arrival: 11:55 AM",
+    ])
+    registry = Registry(str(tmp_path / "registry.json"), people)
+    registry.merge(parse_airline_email(text, 2026))
+    record = registry.get("B6611-2026-10-03")
+    assert record is not None and record.leg.sched_dep_iso is not None
+    departure = datetime.fromisoformat(record.leg.sched_dep_iso).timestamp()
     now = departure - 2 * 60 * 60
     monitor = Monitor(str(tmp_path / "monitor.json"))
 
@@ -102,17 +146,22 @@ def test_generic_email_enters_watch_at_two_hours_before_departure(fixtures, tmp_
     assert monitor.state_snapshot()[record.flight_id]["phase"] == "watch"
 
 
-def test_generic_email_collects_its_named_passenger(fixtures) -> None:
-    flight = _parse(fixtures, "email_jetblue_generic.txt")[0]
+def test_generic_email_named_passenger_is_consumed_by_registry(
+    fixtures, tmp_path, people
+) -> None:
+    text = (fixtures / "email_jetblue_generic.txt").read_text(encoding="utf-8")
+    text = text.replace("Juniper Wren", "Alex Kestrel")
+    registry = Registry(str(tmp_path / "registry.json"), people)
 
-    assert flight.hints["passenger_name"] == "Juniper Wren"
-    assert flight.hints["passenger_names"] == ["Juniper Wren"]
+    registry.merge(parse_airline_email(text, 2026))
+
+    assert registry.get("B6611-2026-10-03").person.key == "alex"
 
 
-def test_generic_email_collects_every_passenger_on_the_record() -> None:
+def test_generic_email_attributes_every_passenger_on_the_record(tmp_path, people) -> None:
     text = "\n".join([
-        "Passenger: Harriet Q Voss",
-        "Passenger: Tobias Voss",
+        "Passenger: Alex Kestrel",
+        "Passenger: Sam Kestrel",
         "Confirmation: FAKEG2",
         "Travel Date: 2026-10-03",
         "Flight: JetBlue 611",
@@ -121,10 +170,11 @@ def test_generic_email_collects_every_passenger_on_the_record() -> None:
         "Arrives: 11:55 AM",
     ])
 
-    flight = parse_airline_email(text, 2026)[0]
+    registry = Registry(str(tmp_path / "registry.json"), people)
 
-    assert flight.hints["passenger_name"] == "Harriet Q Voss"
-    assert flight.hints["passenger_names"] == ["Harriet Q Voss", "Tobias Voss"]
+    registry.merge(parse_airline_email(text, 2026))
+
+    assert {record.person.key for record in registry.all_records()} == {"alex", "sam"}
 
 
 def test_generic_clock_with_unresolved_origin_stays_untimed_and_is_reported(caplog) -> None:
@@ -211,7 +261,7 @@ def test_adversarial_near_matches_are_bounded_by_the_email_size_cap() -> None:
     assert time.monotonic() - started < 2.0
 
 
-def test_explicit_operating_airline_without_number_is_partial_and_polls_marketed() -> None:
+def test_operating_carrier_on_marketed_flight_supplies_the_polling_identity() -> None:
     text = "\n".join([
         "Confirmation: FAKEO1",
         "Date: 2026-10-10",
@@ -221,8 +271,49 @@ def test_explicit_operating_airline_without_number_is_partial_and_polls_marketed
 
     flight = parse_airline_email(text, 2026)[0].leg
 
-    assert (flight.operating_carrier, flight.operating_number) == ("OO", None)
-    assert polling_callsign(flight) == "AAL4912"
+    assert (flight.operating_carrier, flight.operating_number) == ("OO", 4912)
+    assert polling_callsign(flight) == "OO4912"
+
+
+def test_operating_alias_with_flight_number_supplies_the_polling_identity() -> None:
+    text = "\n".join([
+        "Confirmation: FAKEO3",
+        "Date: 2026-10-10",
+        "Flight: United Airlines 9 operated by ANA as NH 0009",
+        "Route: JFK -> LAX",
+    ])
+
+    flight = parse_airline_email(text, 2026)[0].leg
+
+    assert (flight.operating_carrier, flight.operating_number) == ("NH", 9)
+    assert polling_callsign(flight) == "NH9"
+
+
+def test_schedule_change_operating_carrier_supplies_the_polling_identity(fixtures) -> None:
+    text = (fixtures / "email_delta_schedule_change.txt").read_text(encoding="utf-8")
+    text = text.replace(
+        "Delta 365", "Delta 365 operated by SkyWest as Delta Connection", 1
+    )
+
+    flight = parse_airline_email(text, 2026)[0].leg
+
+    assert (flight.operating_carrier, flight.operating_number) == ("OO", 365)
+    assert polling_callsign(flight) == "OO365"
+
+
+def test_separate_operating_carrier_line_uses_the_marketed_flight_number() -> None:
+    text = "\n".join([
+        "Confirmation: FAKEO4",
+        "Date: 2026-10-10",
+        "Flight: Delta 365",
+        "Route: JFK -> LAX",
+        "Operated by SkyWest as Delta Connection",
+    ])
+
+    flight = parse_airline_email(text, 2026)[0].leg
+
+    assert (flight.operating_carrier, flight.operating_number) == ("OO", 365)
+    assert polling_callsign(flight) == "OO365"
 
 
 def test_explicit_operating_flight_sets_both_operating_fields() -> None:
@@ -505,16 +596,19 @@ def test_schedule_change_uses_only_the_new_itinerary(fixtures) -> None:
 
 
 @pytest.mark.parametrize(
-    ("month_token", "expected_date"),
+    ("month_token", "month_number"),
     [
-        ("May", "2026-05-21"),
-        ("Jun", "2026-06-21"),
-        ("June", "2026-06-21"),
-        ("Nov", "2026-11-21"),
+        ("Jan", 1), ("January", 1), ("Feb", 2), ("February", 2),
+        ("Mar", 3), ("March", 3), ("Apr", 4), ("April", 4),
+        ("May", 5), ("May", 5), ("Jun", 6), ("June", 6),
+        ("Jul", 7), ("July", 7), ("Aug", 8), ("August", 8),
+        ("Sep", 9), ("September", 9), ("Oct", 10), ("October", 10),
+        ("Nov", 11), ("November", 11), ("Dec", 12), ("December", 12),
+        ("Sept", 9), ("Jun.", 6),
     ],
 )
-def test_schedule_change_accepts_abbreviated_and_full_month_names(
-    fixtures, month_token, expected_date
+def test_schedule_change_accepts_the_month_matrix(
+    fixtures, month_token, month_number
 ) -> None:
     text = (fixtures / "email_delta_schedule_change.txt").read_text(encoding="utf-8")
     text = text.replace("May", month_token)
@@ -522,7 +616,13 @@ def test_schedule_change_accepts_abbreviated_and_full_month_names(
     flights = parse_airline_email(text, 2026)
 
     assert len(flights) == 1
-    assert flights[0].leg.date == expected_date
+    assert flights[0].leg.date == "2026-{:02d}-21".format(month_number)
+
+
+def test_schedule_change_rejects_a_non_month_token(fixtures) -> None:
+    text = (fixtures / "email_delta_schedule_change.txt").read_text(encoding="utf-8")
+
+    assert parse_airline_email(text.replace("May", "Tues"), 2026) == []
 
 
 @pytest.mark.parametrize("departure_time", ["6:00 XM", ""])
@@ -558,17 +658,23 @@ def test_a_damaged_date_does_not_stop_ingestion(fixtures) -> None:
     assert parse_airline_email(text, 10**9) == []
 
 
-def test_receipt_captures_every_name_and_keeps_the_first_primary(fixtures) -> None:
+def test_receipt_passenger_names_are_consumed_by_registry(fixtures, tmp_path, people) -> None:
     text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
     text = text.replace(
         "Name: ROBIN J KESTREL",
-        "Name: HARRIET Q VOSS\nName: TOBIAS VOSS",
+        "Name: ALEX KESTREL\nName: SAM KESTREL",
     )
+    registry = Registry(str(tmp_path / "registry.json"), people)
 
-    flights = parse_airline_email(text, 2026)
+    registry.merge(parse_airline_email(text, 2026))
 
-    assert flights[0].hints["passenger_names"] == ["HARRIET Q VOSS", "TOBIAS VOSS"]
-    assert flights[0].hints["passenger_name"] == "HARRIET Q VOSS"
+    by_flight = {}
+    for record in registry.all_records():
+        by_flight.setdefault((record.leg.number, record.leg.date), set()).add(record.person.key)
+    assert by_flight == {
+        (667, "2026-05-11"): {"alex", "sam"},
+        (1226, "2026-05-14"): {"alex", "sam"},
+    }
 
 
 def test_untitled_trip_greeting_yields_a_passenger_name(fixtures) -> None:

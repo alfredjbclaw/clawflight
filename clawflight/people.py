@@ -154,32 +154,60 @@ class PersonTable:
         return person.ref if person is not None else None
 
     def person_from_hints(self, hints: dict) -> PersonRef:
+        """Return the first attributed person for legacy single-person callers."""
+        return self.persons_from_hints(hints)[0]
+
+    def persons_from_hints(self, hints: dict) -> Tuple[PersonRef, ...]:
+        """Return every person named by the strongest available evidence."""
         explicit = self.from_key(hints.get("person_key"))
         if explicit is not None:
-            return explicit
+            return (explicit,)
+        passenger_values = hints.get("passenger_names")
+        names = (
+            list(passenger_values)
+            if isinstance(passenger_values, (list, tuple))
+            else []
+        )
         passenger = hints.get("passenger_name")
-        if isinstance(passenger, str):
-            matched = self.from_text(passenger)
-            if matched is not None:
-                return matched
+        if isinstance(passenger, str) and passenger not in names:
+            names.insert(0, passenger)
+        passengers = []
+        seen = set()
+        for name in names:
+            matched = self.from_text(name) if isinstance(name, str) else None
+            if matched is not None and matched.key not in seen:
+                passengers.append(matched)
+                seen.add(matched.key)
+        if passengers:
+            return tuple(passengers)
         title = hints.get("title")
         if isinstance(title, str):
             matched = self.from_title(title)
             if matched is not None:
-                return matched
+                return (matched,)
         attendees = hints.get("attendees")
         if isinstance(attendees, list):
             for attendee in attendees:
                 matched = self.from_attendee(attendee)
                 if matched is not None:
-                    return matched
-        return UNKNOWN_PERSON
+                    return (matched,)
+        return (UNKNOWN_PERSON,)
 
     def rank(self, hints: dict) -> int:
         if self.from_key(hints.get("person_key")) is not None:
             return 4
+        passenger_values = hints.get("passenger_names")
+        names = (
+            list(passenger_values)
+            if isinstance(passenger_values, (list, tuple))
+            else []
+        )
         passenger = hints.get("passenger_name")
-        if isinstance(passenger, str) and self.from_text(passenger) is not None:
+        if isinstance(passenger, str):
+            names.append(passenger)
+        if any(
+            isinstance(name, str) and self.from_text(name) is not None for name in names
+        ):
             return 3
         title = hints.get("title")
         if isinstance(title, str) and self.from_title(title) is not None:

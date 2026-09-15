@@ -254,6 +254,63 @@ def test_bookings_with_distinct_confirmations_stay_separate(registry) -> None:
 # -- attribution ------------------------------------------------------------
 
 
+def test_two_passenger_record_persists_attribution_for_both_people(
+    tmp_path, people
+) -> None:
+    path = tmp_path / "registry.json"
+    registry = Registry(str(path), people)
+
+    report = registry.merge([
+        _parsed(
+            "AA",
+            4912,
+            "2026-07-11",
+            "two-travelers",
+            conf_code="FAKE22",
+            hints={
+                "passenger_name": "Alex Kestrel",
+                "passenger_names": ["Alex Kestrel", "Sam Kestrel"],
+            },
+        )
+    ])
+
+    assert report["created"] == ["AA4912-2026-07-11", "AA4912-2026-07-11#sam"]
+    reloaded = Registry(str(path), people)
+    assert {record.person.key for record in reloaded.all_records()} == {"alex", "sam"}
+
+
+def test_incremental_reordered_passengers_reconcile_by_person_key(
+    tmp_path, people
+) -> None:
+    path = tmp_path / "registry.json"
+    registry = Registry(str(path), people)
+    registry.merge([
+        _parsed(
+            "AA", 4912, "2026-07-11", "alex-only",
+            hints={"passenger_names": ["Alex Kestrel"]},
+        )
+    ])
+
+    report = registry.merge([
+        _parsed(
+            "AA", 4912, "2026-07-11", "both-reordered",
+            hints={
+                "passenger_name": "Sam Kestrel",
+                "passenger_names": ["Sam Kestrel", "Alex Kestrel"],
+            },
+        )
+    ])
+
+    assert report["created"] == ["AA4912-2026-07-11#sam"]
+    reloaded = Registry(str(path), people)
+    records = {record.flight_id: record for record in reloaded.all_records()}
+    assert records["AA4912-2026-07-11"].person.key == "alex"
+    assert records["AA4912-2026-07-11#sam"].person.key == "sam"
+    assert records["AA4912-2026-07-11"].sources == (
+        "cal:alex-only", "cal:both-reordered"
+    )
+
+
 def test_fixture_bookings_merge_and_attribute_their_passengers(
     registry, calendar_text
 ) -> None:

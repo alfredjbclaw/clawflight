@@ -108,3 +108,10 @@ appears in a log line or an exception message.
 Tests assert what the user receives — the number of messages, their text, the argv or
 request that carries them — not internal constants. A threshold is an implementation
 detail; "this 9-value wobble produces at most 2 alerts" is the contract.
+
+## I13 — Every named traveler keeps an attributed registry record
+
+When one booking names several configured people, the registry retains one record per
+person. Existing records reconcile by person key rather than passenger order; added
+travelers use a person-key suffix. Attribution survives persistence and each traveler
+can receive the right flight updates.

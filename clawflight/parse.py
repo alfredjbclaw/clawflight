@@ -48,6 +48,9 @@ AIRLINE_NAME_TO_IATA = {
     "air france": "AF",
     "lufthansa": "LH",
     "emirates": "EK",
+    "ana": "NH",
+    "all nippon airways": "NH",
+    "skywest": "OO",
     "skywest airlines": "OO",
     "republic airways": "YX",
     "envoy air": "MQ",
@@ -210,6 +213,16 @@ _EMAIL_CARRIER_TOKEN_PATTERN = "(?:{}|{})".format(
 )
 _EMAIL_OPERATED_SUFFIX = r"(?:\s+operated\s+by\s+.{1,100})?"
 
+_DEPARTURE_LABEL_PATTERN = (
+    r"(?:Departs|Departing|Departure(?:\s+time)?|Depart|Dep|Leaves)"
+)
+_ARRIVAL_LABEL_PATTERN = (
+    r"(?:Arrives|Arriving|Arrival(?:\s+time)?|Arrive|Arr|Reaches)"
+)
+_TIME_LABEL_PATTERN = r"(?:(?P<departure>{})|(?P<arrival>{}))".format(
+    _DEPARTURE_LABEL_PATTERN, _ARRIVAL_LABEL_PATTERN
+)
+
 
 def _build_timezones() -> "dict[str, str]":
     return {iata: airport.tz for iata, airport in default_airports().items()}
@@ -251,7 +264,10 @@ class ParsedFlight:
 
 def _month_date(month: str, day: str, year: int) -> "Optional[str]":
     """Parse an abbreviated or full English month name without guessing a year."""
-    value = "{} {} {}".format(month, day, year)
+    normalized = month.strip().rstrip(".")
+    if normalized.casefold() == "sept":
+        normalized = "Sep"
+    value = "{} {} {}".format(normalized, day, year)
     for format_string in ("%b %d %Y", "%B %d %Y"):
         try:
             return datetime.strptime(value, format_string).date().isoformat()
@@ -377,7 +393,7 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
             dep_time = _clock_value(dep_field)
             arr_time = _clock_value(lines[2]) if len(lines) > 2 else None
             operating_carrier, operating_number = _operating_identity(
-                section[flight.start():flight_end]
+                section[flight.start():flight_end], number
             )
             parsed.append(
                 _airline_parsed_flight(
@@ -447,7 +463,9 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
             r"(?im)^\s*Seats?:\s*(\d{1,2}[A-F])\s*$",
             block[carrier_match.end() :],
         )
-        operating_carrier, operating_number = _operating_identity(block)
+        operating_carrier, operating_number = _operating_identity(
+            block, int(carrier_match.group("number"))
+        )
         parsed.append(
             _airline_parsed_flight(
                 carrier, int(carrier_match.group("number")), date,
@@ -478,7 +496,7 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
     heading = re.search(
         r"(?im)^\s*(?P<carrier>{})\s+(?P<number>\d{{1,4}}){}\s*$\s*"
         r"^\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*"
-        r"(?P<month>[A-Z][a-z]+)\s+(?P<day>\d{{1,2}})\s*$".format(
+        r"(?P<month>[A-Z][a-z]+\.?)\s+(?P<day>\d{{1,2}})\s*$".format(
             _EMAIL_CARRIER_TOKEN_PATTERN,
             _EMAIL_OPERATED_SUFFIX,
         ),
@@ -500,7 +518,9 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
     carrier = _resolve_carrier(heading.group("carrier"))
     if carrier is None:
         return []
-    operating_carrier, operating_number = _operating_identity(new_section)
+    operating_carrier, operating_number = _operating_identity(
+        new_section, int(heading.group("number"))
+    )
     return [
         _airline_parsed_flight(
             carrier, int(heading.group("number")), date,
@@ -565,7 +585,7 @@ def _parse_generic_email(text: str, default_year: int) -> "list[ParsedFlight]":
         if key in seen:
             continue
         block = "\n".join(lines[index:upper])
-        operating_carrier, operating_number = _operating_identity(block)
+        operating_carrier, operating_number = _operating_identity(block, number)
         dep_time, arr_time = _generic_times(lines, lower, upper)
         hints = {}
         if passengers:
@@ -600,18 +620,17 @@ def _generic_times(lines, lower: int, upper: int):
             continue
         match = re.fullmatch(
             r"\s*(?:Scheduled\s+)?"
-            r"(?P<label>Depart(?:s|ure)?|Departure\s+time|"
-            r"Arriv(?:e|es|al)|Arrival\s+time)\s*:\s*(?P<value>.{1,80})\s*",
+            + _TIME_LABEL_PATTERN
+            + r"(?:\s*:\s*|\s+)(?P<value>.{1,80})\s*",
             line,
             re.IGNORECASE,
         )
         if match is None:
             continue
         clock = _clock_in(match.group("value"))
-        label = match.group("label").casefold()
-        if label.startswith("depart") and departure is None:
+        if match.group("departure") is not None and departure is None:
             departure = clock
-        elif label.startswith("arriv") and arrival is None:
+        elif match.group("arrival") is not None and arrival is None:
             arrival = clock
     return departure, arrival
 
@@ -687,6 +706,16 @@ def _generic_date(line: str, default_year: int) -> "Optional[str]":
     value = (match.group(1) or match.group(2)).strip()
     value = re.sub(r"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?[,]?\s+", "", value,
                    flags=re.IGNORECASE)
+    month_first = re.fullmatch(
+        r"(?P<month>[A-Za-z]+\.?)\s+(?P<day>\d{1,2})(?:,?\s+(?P<year>\d{4}))?",
+        value,
+    )
+    if month_first is not None:
+        return _month_date(
+            month_first.group("month"),
+            month_first.group("day"),
+            int(month_first.group("year") or default_year),
+        )
     for format_string in ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%B %d", "%b %d"):
         try:
             parsed = datetime.strptime(value, format_string)
@@ -740,13 +769,16 @@ def _generic_confirmation(text: str) -> "Optional[str]":
     return None
 
 
-def _operating_identity(text: str) -> "tuple[Optional[str], Optional[int]]":
+def _operating_identity(
+    text: str, marketed_number: "Optional[int]" = None
+) -> "tuple[Optional[str], Optional[int]]":
     for line in text.splitlines():
         if len(line) > 240:
             continue
         match = re.fullmatch(
             r"\s*(?:(?P<prefix>.{{1,100}}?)\s+)?"
-            r"Operated\s+by\s+(?P<carrier>{})(?:\s+as\s+.{{1,80}})?\s*".format(
+            r"Operated\s+by\s+(?P<carrier>{})"
+            r"(?:\s+as\s+(?P<alias>.{{1,80}}))?\s*".format(
                 _EMAIL_CARRIER_TOKEN_PATTERN
             ),
             line,
@@ -755,20 +787,32 @@ def _operating_identity(text: str) -> "tuple[Optional[str], Optional[int]]":
         if match is None:
             continue
         carrier = _resolve_carrier(match.group("carrier"))
-        explicit_flight = re.fullmatch(
-            r"\s*([A-Z0-9]{2})\s*-?\s*(\d{1,4})\s*",
+        alias_flight = re.search(
+            r"\b([A-Z0-9]{2})\s*-?\s*(\d{1,4})\s*$",
+            match.group("alias") or "",
+            re.IGNORECASE,
+        )
+        if (
+            alias_flight is not None
+            and carrier is not None
+            and _resolve_carrier(alias_flight.group(1)) == carrier
+        ):
+            return carrier, int(alias_flight.group(2))
+        prefix_flight = re.search(
+            r"(?P<carrier>{})\s*-?\s*(?P<number>\d{{1,4}})\s*$".format(
+                _EMAIL_CARRIER_TOKEN_PATTERN
+            ),
             match.group("prefix") or "",
             re.IGNORECASE,
         )
-        explicit = (
-            _resolve_carrier(explicit_flight.group(1)) if explicit_flight else None
+        # On an inline codeshare line, the number immediately before
+        # "operated by" identifies this flight; only the carrier changes.
+        return (
+            carrier,
+            int(prefix_flight.group("number"))
+            if carrier is not None and prefix_flight is not None
+            else marketed_number if carrier is not None else None,
         )
-        number = (
-            int(explicit_flight.group(2))
-            if explicit_flight and explicit == carrier and carrier
-            else None
-        )
-        return carrier, number
     return None, None
 
 

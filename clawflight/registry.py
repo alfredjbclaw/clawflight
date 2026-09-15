@@ -100,37 +100,66 @@ class Registry:
                     unresolved_airports.update(
                         value for value in values if isinstance(value, str) and value
                     )
-                flight_id = flight_ident(
+                base_flight_id = flight_ident(
                     flight.leg.carrier, flight.leg.number, flight.leg.date
                 )
-                incoming = self._record_from_parsed(flight, flight_id)
-                existing = self._records.get(flight_id)
-                # A same-flight/same-date entry carrying a DIFFERENT confirmation
-                # code is a separate intentional booking (two seats bought on one
-                # day), not a duplicate to merge — key it distinctly by conf.
-                if existing is not None and _differs_by_conf(existing, incoming):
-                    flight_id = "{}#{}".format(flight_id, incoming.leg.conf_code)
-                    incoming = self._record_from_parsed(flight, flight_id)
-                    existing = self._records.get(flight_id)
+                people = self._people.persons_from_hints(flight.hints)
                 incoming_rank = self._people.rank(flight.hints)
-                if existing is None:
-                    self._records[flight_id] = incoming
-                    self._attribution_ranks[flight_id] = incoming_rank
-                    created.append(flight_id)
-                    continue
-                merged = self._merge_records(
-                    existing,
-                    incoming,
-                    self._attribution_ranks.get(flight_id, _legacy_person_rank(existing)),
-                    incoming_rank,
-                )
-                if merged != existing:
-                    self._records[flight_id] = merged
-                    updated.append(flight_id)
-                self._attribution_ranks[flight_id] = max(
-                    self._attribution_ranks.get(flight_id, _legacy_person_rank(existing)),
-                    incoming_rank,
-                )
+                incoming_person_keys = {person.key for person in people}
+                for person_index, person in enumerate(people):
+                    flight_id = self._existing_id_for_person(
+                        base_flight_id, person, flight.leg.conf_code
+                    )
+                    if flight_id is None:
+                        canonical = self._records.get(base_flight_id)
+                        may_reassign_canonical = (
+                            canonical is not None
+                            and canonical.person.key not in incoming_person_keys
+                            and incoming_rank
+                            > self._attribution_ranks.get(
+                                base_flight_id, _legacy_person_rank(canonical)
+                            )
+                        )
+                        if canonical is None or (
+                            len(people) > 1
+                            and person_index == 0
+                            and may_reassign_canonical
+                        ):
+                            flight_id = base_flight_id
+                        elif len(people) > 1:
+                            flight_id = "{}#{}".format(base_flight_id, person.key)
+                        else:
+                            # Preserve the established key for a distinct booking.
+                            flight_id = base_flight_id
+                    incoming = self._record_from_parsed(flight, flight_id, person)
+                    existing = self._records.get(flight_id)
+                    # A same-flight/same-date entry carrying a DIFFERENT confirmation
+                    # code is a separate intentional booking (two seats bought on one
+                    # day), not a duplicate to merge — key it distinctly by conf.
+                    if existing is not None and _differs_by_conf(existing, incoming):
+                        flight_id = "{}#{}".format(flight_id, incoming.leg.conf_code)
+                        incoming = self._record_from_parsed(flight, flight_id, person)
+                        existing = self._records.get(flight_id)
+                    if existing is None:
+                        self._records[flight_id] = incoming
+                        self._attribution_ranks[flight_id] = incoming_rank
+                        created.append(flight_id)
+                        continue
+                    merged = self._merge_records(
+                        existing,
+                        incoming,
+                        self._attribution_ranks.get(flight_id, _legacy_person_rank(existing)),
+                        incoming_rank,
+                    )
+                    if merged != existing:
+                        self._records[flight_id] = merged
+                        updated.append(flight_id)
+                    self._attribution_ranks[flight_id] = max(
+                        self._attribution_ranks.get(
+                            flight_id, _legacy_person_rank(existing)
+                        ),
+                        incoming_rank,
+                    )
 
             backup_groups = self._assign_backup_groups()
             if created or updated or backup_groups:
@@ -141,6 +170,24 @@ class Registry:
                 "backup_groups": backup_groups,
                 "unresolved_airports": sorted(unresolved_airports),
             }
+
+    def _existing_id_for_person(
+        self, base_flight_id: str, person: PersonRef, conf_code: Optional[str]
+    ) -> Optional[str]:
+        """Find this person's compatible record independent of passenger order."""
+        for flight_id, record in self._records.items():
+            if not (
+                flight_id == base_flight_id
+                or flight_id.startswith(base_flight_id + "#")
+            ):
+                continue
+            if record.person.key != person.key:
+                continue
+            existing_conf = record.leg.conf_code
+            if existing_conf and conf_code and existing_conf != conf_code:
+                continue
+            return flight_id
+        return None
 
     def merge_email_candidates(
         self, candidates: "Iterable[EmailItineraryCandidate]"
@@ -302,13 +349,15 @@ class Registry:
                 self._write()
             return dropped
 
-    def _record_from_parsed(self, parsed: ParsedFlight, flight_id: str) -> FlightRecord:
+    def _record_from_parsed(
+        self, parsed: ParsedFlight, flight_id: str, person: Optional[PersonRef] = None
+    ) -> FlightRecord:
         hints = parsed.hints
         source = _source_value(hints.get("source_id"))
         return FlightRecord(
             flight_id=flight_id,
             leg=parsed.leg,
-            person=self._people.person_from_hints(hints),
+            person=person or self._people.person_from_hints(hints),
             sources=(source,) if source is not None else (),
             backup_group=None,
             status="scheduled",
