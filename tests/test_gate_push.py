@@ -114,7 +114,10 @@ def test_a_push_notification_reaches_an_acknowledged_delivery(tmp_path, people) 
 
     events = monitor.ingest_push_for_bookings(update, bookings, NOW)
     kinds = [event.kind for event in events]
-    assert "delay" in kinds and "schedule_change" in kinds
+    assert kinds == ["delay", "schedule_change"]
+    assert "departure schedule changed" not in "\n".join(
+        event.message for event in events
+    ).casefold()
 
     for event in events:
         outbox.enqueue(event, bookings[0], text=compose_post(event, bookings[0]))
@@ -216,3 +219,29 @@ def test_push_state_stays_off_until_the_upgrade_is_configured() -> None:
     # Secrets are named, never held.
     assert default.push.rapidapi_key_env == "CLAWFLIGHT_RAPIDAPI_KEY"
     assert default.push.webhook_secret_env == "CLAWFLIGHT_WEBHOOK_SECRET"
+
+
+def test_post_landed_push_emits_nothing_and_updates_state(tmp_path) -> None:
+    path = tmp_path / "monitor.json"
+    path.write_text(json.dumps({
+        "AA4912-2026-07-11": {"flight_id": "AA4912-2026-07-11", "phase": "landed"}
+    }))
+    monitor = Monitor(str(path))
+    update = normalize_notification(DELAY_NOTIFICATION)[0]
+
+    assert monitor.ingest_push(update, NOW) == []
+    state = json.loads(path.read_text())["AA4912-2026-07-11"]
+    assert state["departure_revised"] == "2026-07-11T13:51:00-06:00"
+
+
+def test_post_done_push_emits_nothing_and_updates_state(tmp_path) -> None:
+    path = tmp_path / "monitor.json"
+    path.write_text(json.dumps({
+        "AA4912-2026-07-11": {"flight_id": "AA4912-2026-07-11", "phase": "done"}
+    }))
+    monitor = Monitor(str(path))
+    update = normalize_notification(DELAY_NOTIFICATION)[0]
+
+    assert monitor.ingest_push(update, NOW) == []
+    state = json.loads(path.read_text())["AA4912-2026-07-11"]
+    assert state["arrival_revised"] == "2026-07-11T17:10:00-05:00"

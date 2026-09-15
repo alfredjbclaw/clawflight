@@ -216,19 +216,70 @@ def test_stale_position_is_reported_once_while_airborne(tmp_path) -> None:
         airborne_at,
     )
 
-    stale_at = airborne_at + 901
+    stale_at = airborne_at + 3000
     events = monitor.assess(
         record, _observation(record, fetched_at=stale_at), _airports(), stale_at
     )
 
     assert [event.kind for event in events] == ["stale_data"]
     assert events[0].critical is False
-    assert (
-        monitor.assess(
-            record, _observation(record, fetched_at=stale_at + 60), _airports(), stale_at + 60
-        )
-        == []
+    assert "AA4912" in events[0].message
+    assert "has not had a confirmed position" in events[0].message
+    assert "45 minutes" in events[0].message
+    assert all(
+        word not in events[0].message.casefold()
+        for word in ("feed", "poller", "push tier")
     )
+
+
+def test_stale_position_second_pass_is_silent(tmp_path) -> None:
+    record = _record()
+    monitor = Monitor(str(tmp_path / "monitor.json"))
+    airborne_at = DEPARTURE - 3600
+    monitor.assess(
+        record,
+        _observation(
+            record,
+            position=Position(0.0, 1.0, 20_000.0, 300.0, 500.0, airborne_at),
+            fetched_at=airborne_at,
+        ),
+        _airports(),
+        airborne_at,
+    )
+    stale_at = airborne_at + 3000
+    monitor.assess(
+        record, _observation(record, fetched_at=stale_at), _airports(), stale_at
+    )
+
+    repeated = monitor.assess(
+        record, _observation(record, fetched_at=stale_at + 60),
+        _airports(), stale_at + 60,
+    )
+
+    assert repeated == []
+
+
+def test_stale_position_under_45_minutes_is_silent(tmp_path) -> None:
+    record = _record()
+    monitor = Monitor(str(tmp_path / "monitor.json"))
+    airborne_at = DEPARTURE - 3600
+    monitor.assess(
+        record,
+        _observation(
+            record,
+            position=Position(0.0, 1.0, 20_000.0, 300.0, 500.0, airborne_at),
+            fetched_at=airborne_at,
+        ),
+        _airports(),
+        airborne_at,
+    )
+
+    events = monitor.assess(
+        record, _observation(record, fetched_at=airborne_at + 1000),
+        _airports(), airborne_at + 1000,
+    )
+
+    assert events == []
 
 
 def test_landing_is_inferred_when_a_near_complete_track_disappears(tmp_path) -> None:
@@ -248,9 +299,9 @@ def test_landing_is_inferred_when_a_near_complete_track_disappears(tmp_path) -> 
 
     events = monitor.assess(
         record,
-        _observation(record, fetched_at=airborne_at + 901),
+        _observation(record, fetched_at=airborne_at + 2701),
         _airports(),
-        airborne_at + 901,
+        airborne_at + 2701,
     )
 
     assert [event.kind for event in events] == ["landing"]
@@ -412,11 +463,18 @@ def test_elapsed_time_alone_never_raises_a_delay(tmp_path) -> None:
         record, _observation(record, fetched_at=elapsed_at), _airports(), elapsed_at
     )
 
-    # Then: one informational no-position note instead of a false delay.
+    # Then: one flight-focused status note instead of a false delay.
     kinds = [event.kind for event in events]
     assert "delay" not in kinds
     assert "stale_data" in kinds
-    assert next(e for e in events if e.kind == "stale_data").critical is False
+    stale_event = next(e for e in events if e.kind == "stale_data")
+    assert stale_event.critical is False
+    assert "AA4912" in stale_event.message
+    assert "past its scheduled departure time" in stale_event.message
+    assert all(
+        word not in stale_event.message.casefold()
+        for word in ("feed", "poller", "push tier", "position data", "corroboration")
+    )
 
     later = monitor.assess(
         record, _observation(record, fetched_at=elapsed_at + 600), _airports(), elapsed_at + 600
@@ -454,7 +512,7 @@ def test_a_push_revision_corroborates_an_elapsed_time_delay(tmp_path) -> None:
     assert "delay" in [event.kind for event in events]
 
 
-def test_an_arrival_ground_stop_warns_of_a_landing_hold_once(tmp_path) -> None:
+def test_an_arrival_ground_stop_warns_of_a_landing_hold_once(tmp_path, caplog) -> None:
     record = _record()
     monitor = Monitor(str(tmp_path / "monitor.json"))
     airborne_at = DEPARTURE - 3600
@@ -468,21 +526,22 @@ def test_an_arrival_ground_stop_warns_of_a_landing_hold_once(tmp_path) -> None:
         airborne_at,
     )
 
-    events = monitor.assess(
-        record,
-        _observation(
+    with caplog.at_level("WARNING", logger="clawflight.monitor"):
+        events = monitor.assess(
             record,
-            position=replace(position, ts_epoch=airborne_at + 1801),
-            dest_delay={"type": "ground_stop", "reason": "weather"},
-            fetched_at=airborne_at + 1801,
-        ),
-        _airports(),
-        airborne_at + 1801,
-    )
+            _observation(
+                record,
+                position=replace(position, ts_epoch=airborne_at + 1801),
+                dest_delay={"type": "ground_stop", "reason": "weather"},
+                fetched_at=airborne_at + 1801,
+            ),
+            _airports(),
+            airborne_at + 1801,
+        )
 
-    assert [event.kind for event in events] == ["landing_hold", "push_stale"]
+    assert [event.kind for event in events] == ["landing_hold"]
     assert events[0].critical is True
-    assert events[1].critical is False
+    assert len([record for record in caplog.records if record.levelname == "WARNING"]) == 1
 
 
 # -- push diffing -----------------------------------------------------------
@@ -515,12 +574,12 @@ def test_push_diffs_revisions_gate_and_status_idempotently() -> None:
     first = ingest_push(update, state)
     second = ingest_push(update, state)
 
-    assert [event.kind for event in first] == ["delay", "schedule_change", "gate_change"]
+    assert [event.kind for event in first] == ["delay", "gate_change"]
     assert second == []
     assert state["last_push_epoch"] == 100.0
 
 
-def test_push_cancellation_and_diversion_alert_once_each() -> None:
+def test_push_cancellation_alerts_once_and_later_push_is_silent() -> None:
     cancelled = normalize_notification(
         {"flight": {"number": "DL4133", "status": "Cancelled"}}
     )[0]
@@ -536,7 +595,7 @@ def test_push_cancellation_and_diversion_alert_once_each() -> None:
     assert [event.kind for event in first] == ["cancelled"]
     assert state["phase"] == "cancelled"
     assert repeat == []
-    assert [event.kind for event in second] == ["diverted"]
+    assert second == []
 
 
 def _departure_update(scheduled: str, revised: str, status: str = "Scheduled") -> FlightUpdate:
@@ -545,8 +604,29 @@ def _departure_update(scheduled: str, revised: str, status: str = "Scheduled") -
     )
 
 
-def test_a_later_revision_alerts_normally_in_any_phase(caplog) -> None:
-    update = _departure_update("2026-07-28T20:00:00-04:00", "2026-07-28T20:00:30-04:00")
+def _revised_iso(scheduled: str, delta_minutes: int) -> str:
+    return datetime.fromtimestamp(
+        datetime.fromisoformat(scheduled).timestamp() + delta_minutes * 60,
+        timezone.utc,
+    ).isoformat()
+
+
+def _arrival_update(scheduled: str, delta_minutes: int) -> FlightUpdate:
+    return normalize_notification(
+        {
+            "flight": {
+                "number": "AA4912",
+                "arrival": {
+                    "scheduledTime": {"local": scheduled},
+                    "revisedTime": {"local": _revised_iso(scheduled, delta_minutes)},
+                },
+            }
+        }
+    )[0]
+
+
+def test_a_material_later_revision_alerts_normally_in_active_phases(caplog) -> None:
+    update = _departure_update("2026-07-28T20:00:00-04:00", "2026-07-28T20:15:00-04:00")
     now = datetime.fromisoformat("2026-07-28T19:00:00-04:00").timestamp()
 
     with caplog.at_level("WARNING", logger="clawflight.monitor"):
@@ -559,7 +639,7 @@ def test_a_later_revision_alerts_normally_in_any_phase(caplog) -> None:
 
     assert [event.kind for event in predeparture] == ["schedule_change"]
     assert [event.kind for event in postdeparture] == ["schedule_change"]
-    assert all("30 seconds" in event.message for event in predeparture + postdeparture)
+    assert all("15 minutes" in event.message for event in predeparture + postdeparture)
     assert all(
         "unconfirmed" not in event.message.casefold()
         for event in predeparture + postdeparture
@@ -632,7 +712,7 @@ def test_an_implausibly_early_revision_is_hedged_not_asserted(caplog) -> None:
     assert len(anomalies) == 1 and anomalies[0].reason == "early_revision"
 
 
-def test_a_small_early_revision_alerts_without_hedging(caplog) -> None:
+def test_a_small_early_revision_is_below_the_opening_floor(caplog) -> None:
     state = {
         "flight_id": "DL1-2026-07-28",
         "phase": "watch",
@@ -644,8 +724,7 @@ def test_a_small_early_revision_alerts_without_hedging(caplog) -> None:
             _departure_update("2026-07-28T22:00:00-04:00", "2026-07-28T21:55:00-04:00"), state
         )
 
-    assert [event.kind for event in events] == ["schedule_change"]
-    assert "unconfirmed" not in events[0].message.casefold()
+    assert events == []
     assert not [r for r in caplog.records if r.getMessage() == "data_anomaly"]
 
 
@@ -705,7 +784,7 @@ def test_a_schedule_flip_back_does_not_re_alert(tmp_path) -> None:
     flip_back = monitor.ingest_push(_revision("2026-07-11T12:00:00-05:00"), 100.0)
     flip_forward = monitor.ingest_push(_revision("2026-07-11T12:30:00-05:00"), 100.0)
 
-    assert "schedule_change" in [event.kind for event in first]
+    assert [event.kind for event in first] == ["delay"]
     assert flip_back == []
     assert flip_forward == []
 
@@ -733,10 +812,211 @@ def test_saved_schedules_back_a_sparse_revision() -> None:
         small, {"departure_scheduled": "2026-07-11T12:00:00-05:00", "_now_epoch": 1.0}
     )
 
-    assert [event.kind for event in first] == ["delay", "schedule_change"]
+    assert [event.kind for event in first] == ["delay"]
     assert [event.kind for event in second] == ["schedule_change"]
-    # A five-minute slip is a schedule change but not yet a delay bucket.
-    assert [event.kind for event in low_delay] == ["schedule_change"]
+    assert low_delay == []
+
+
+def test_d3_arrival_wobble_produces_at_most_two_alerts() -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    state = {"phase": "watch", "arrival_scheduled": scheduled, "_now_epoch": 1.0}
+    events = []
+
+    for delay_minutes in (75, 68, 69, 67, 65, 62, 63, 64, 60):
+        revised = datetime.fromtimestamp(
+            datetime.fromisoformat(scheduled).timestamp() + delay_minutes * 60,
+            timezone.utc,
+        ).isoformat()
+        update = normalize_notification(
+            {
+                "flight": {
+                    "number": "AA4912",
+                    "arrival": {
+                        "scheduledTime": {"local": scheduled},
+                        "revisedTime": {"local": revised},
+                    },
+                }
+            }
+        )[0]
+        events.extend(ingest_push(update, state))
+
+    assert len(events) <= 2
+
+
+def test_arrival_opens_at_material_change_and_saves_alerted_value() -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    state = {"phase": "watch", "_now_epoch": 1.0}
+    update = _arrival_update(scheduled, 75)
+
+    events = ingest_push(update, state)
+
+    assert [event.kind for event in events] == ["schedule_change"]
+    assert state["last_alerted_arr_revised"] == update.arrival_revised
+
+
+def test_arrival_seven_minute_wobble_keeps_last_alerted_value() -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    alerted = _revised_iso(scheduled, 75)
+    state = {
+        "phase": "watch", "arrival_scheduled": scheduled,
+        "arrival_revised": alerted, "last_alerted_arr_revised": alerted,
+        "_now_epoch": 1.0,
+    }
+
+    assert ingest_push(_arrival_update(scheduled, 68), state) == []
+    assert state["last_alerted_arr_revised"] == alerted
+
+
+def test_arrival_thirteen_minute_wobble_keeps_last_alerted_value() -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    alerted = _revised_iso(scheduled, 75)
+    state = {
+        "phase": "watch", "arrival_scheduled": scheduled,
+        "arrival_revised": alerted, "last_alerted_arr_revised": alerted,
+        "_now_epoch": 1.0,
+    }
+
+    assert ingest_push(_arrival_update(scheduled, 62), state) == []
+    assert state["last_alerted_arr_revised"] == alerted
+
+
+def test_arrival_realerts_at_fifteen_minutes_from_last_alert() -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    alerted = _revised_iso(scheduled, 75)
+    update = _arrival_update(scheduled, 60)
+    state = {
+        "phase": "watch", "arrival_scheduled": scheduled,
+        "arrival_revised": alerted, "last_alerted_arr_revised": alerted,
+        "_now_epoch": 1.0,
+    }
+
+    events = ingest_push(update, state)
+
+    assert [event.kind for event in events] == ["schedule_change"]
+    assert state["last_alerted_arr_revised"] == update.arrival_revised
+
+
+def test_arrival_under_opening_floor_is_silent() -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    state = {"phase": "watch", "_now_epoch": 1.0}
+
+    assert ingest_push(_arrival_update(scheduled, 10), state) == []
+    assert "last_alerted_arr_revised" not in state
+
+
+def _assert_terminal_arrival_push_is_recorded(phase: str) -> None:
+    scheduled = "2026-07-11T16:00:00-05:00"
+    update = _arrival_update(scheduled, 75)
+    state = {"phase": phase, "_now_epoch": 1.0}
+
+    assert ingest_push(update, state) == []
+    assert state["arrival_revised"] == update.arrival_revised
+    assert "last_alerted_arr_revised" not in state
+
+
+def test_landed_arrival_push_is_recorded_without_alert() -> None:
+    _assert_terminal_arrival_push_is_recorded("landed")
+
+
+def test_done_arrival_push_is_recorded_without_alert() -> None:
+    _assert_terminal_arrival_push_is_recorded("done")
+
+
+def test_departure_delay_collapse_emits_only_delay() -> None:
+    scheduled = "2026-07-11T12:00:00-05:00"
+    update = _departure_update(scheduled, _revised_iso(scheduled, 40))
+    state = {"phase": "watch", "_now_epoch": 1.0}
+
+    events = ingest_push(update, state)
+
+    assert [event.kind for event in events] == ["delay"]
+    assert state["last_alerted_dep_revised"] == update.departure_revised
+
+
+def test_departure_under_opening_floor_is_silent() -> None:
+    scheduled = "2026-07-11T12:00:00-05:00"
+    state = {"phase": "watch", "_now_epoch": 1.0}
+
+    assert ingest_push(
+        _departure_update(scheduled, _revised_iso(scheduled, 8)), state
+    ) == []
+    assert "last_alerted_dep_revised" not in state
+
+
+def _departure_continuation(delta_minutes: int):
+    scheduled = "2026-07-11T12:00:00-05:00"
+    alerted = _revised_iso(scheduled, 40)
+    update = _departure_update(scheduled, _revised_iso(scheduled, delta_minutes))
+    state = {
+        "phase": "watch", "departure_scheduled": scheduled,
+        "departure_revised": alerted, "last_alerted_dep_revised": alerted,
+        "push_delay_bucket": 45, "_now_epoch": 1.0,
+    }
+
+    events = ingest_push(update, state)
+
+    return events, state, alerted, update
+
+
+def test_departure_ten_minute_wobble_keeps_last_alerted_value() -> None:
+    events, state, alerted, _update = _departure_continuation(50)
+
+    assert events == []
+    assert state["last_alerted_dep_revised"] == alerted
+
+
+def test_departure_twenty_minute_move_realerts() -> None:
+    events, state, _alerted, update = _departure_continuation(60)
+
+    assert [event.kind for event in events] == ["schedule_change"]
+    assert state["last_alerted_dep_revised"] == update.departure_revised
+
+
+def test_fifty_minute_early_departure_revision_stays_hedged() -> None:
+    scheduled = "2026-07-11T12:00:00-05:00"
+    state = {
+        "phase": "watch", "_now_epoch":
+        datetime.fromisoformat("2026-07-11T10:00:00-05:00").timestamp(),
+    }
+
+    events = ingest_push(
+        _departure_update(scheduled, _revised_iso(scheduled, -50)), state
+    )
+
+    assert [event.kind for event in events] == ["schedule_change"]
+    assert "unconfirmed" in events[0].message.casefold()
+
+
+def test_landed_departure_push_updates_state_without_alert() -> None:
+    scheduled = "2026-07-11T12:00:00-05:00"
+    update = _departure_update(scheduled, _revised_iso(scheduled, 40))
+    state = {"phase": "landed", "_now_epoch": 1.0}
+
+    assert ingest_push(update, state) == []
+    assert state["departure_revised"] == update.departure_revised
+
+
+def test_scheduled_cancellation_fires_and_sets_cancelled_phase() -> None:
+    update = normalize_notification(
+        {"flight": {"number": "AA4912", "status": "Cancelled"}}
+    )[0]
+    state = {"phase": "scheduled", "status": "Scheduled", "_now_epoch": 1.0}
+
+    events = ingest_push(update, state)
+
+    assert [event.kind for event in events] == ["cancelled"]
+    assert state["phase"] == "cancelled"
+
+
+def test_landed_cancellation_is_recorded_without_alert() -> None:
+    update = normalize_notification(
+        {"flight": {"number": "AA4912", "status": "Cancelled"}}
+    )[0]
+    state = {"phase": "landed", "status": "Landed", "_now_epoch": 1.0}
+
+    assert ingest_push(update, state) == []
+    assert state["status"] == "Cancelled"
+    assert state["phase"] == "landed"
 
 
 def test_alerts_state_the_new_time_in_local_and_reference_zones(tmp_path) -> None:
@@ -808,7 +1088,7 @@ def test_a_dated_push_never_falls_back_to_another_date(tmp_path) -> None:
     assert {event.flight_id for event in events} == {"AA4912-2026-07-12"}
 
 
-def test_a_push_received_before_the_first_poll_stays_attached(tmp_path) -> None:
+def test_a_push_received_before_the_first_poll_stays_attached(tmp_path, caplog) -> None:
     record = _record()
     monitor = Monitor(str(tmp_path / "monitor.json"))
     poll_at = DEPARTURE - 3600
@@ -817,16 +1097,46 @@ def test_a_push_received_before_the_first_poll_stays_attached(tmp_path) -> None:
         poll_at - 1801,
     )
 
-    events = monitor.assess(
-        record,
-        _observation(
-            record, position=Position(0.0, 1.0, 20_000.0, 300.0, 500.0, poll_at), fetched_at=poll_at
-        ),
-        _airports(),
-        poll_at,
+    with caplog.at_level("WARNING", logger="clawflight.monitor"):
+        events = monitor.assess(
+            record,
+            _observation(
+                record, position=Position(0.0, 1.0, 20_000.0, 300.0, 500.0, poll_at), fetched_at=poll_at
+            ),
+            _airports(),
+            poll_at,
+        )
+        monitor.assess(
+            record, _observation(record, fetched_at=poll_at + 60),
+            _airports(), poll_at + 60,
+        )
+
+    assert "push_stale" not in [event.kind for event in events]
+    assert len([record for record in caplog.records if record.levelname == "WARNING"]) == 1
+
+
+def test_quiet_push_in_watch_logs_once_without_a_push_stale_event(tmp_path, caplog) -> None:
+    record = _record()
+    monitor = Monitor(str(tmp_path / "monitor.json"))
+    watch_at = DEPARTURE - 3600
+    monitor.ingest_push(
+        normalize_notification(
+            {"flight": {"number": "AA4912", "status": "Scheduled"}}
+        )[0],
+        watch_at - 1801,
     )
 
-    assert "push_stale" in [event.kind for event in events]
+    with caplog.at_level("WARNING", logger="clawflight.monitor"):
+        first = monitor.assess(
+            record, _observation(record, fetched_at=watch_at), _airports(), watch_at
+        )
+        second = monitor.assess(
+            record, _observation(record, fetched_at=watch_at + 60),
+            _airports(), watch_at + 60,
+        )
+
+    assert "push_stale" not in [event.kind for event in first + second]
+    assert len([record for record in caplog.records if record.levelname == "WARNING"]) == 1
 
 
 def test_one_update_fans_out_to_every_booking_on_that_flight(tmp_path) -> None:
@@ -947,8 +1257,7 @@ def test_unknown_persisted_keys_do_not_break_a_later_push(tmp_path) -> None:
         _departure_update("2026-07-28T22:00:00-04:00", revised), now
     )
 
-    assert [event.kind for event in events] == ["schedule_change"]
-    assert "unconfirmed" in events[0].message.casefold()
+    assert events == []
 
 
 def test_landed_flights_become_promotable_after_the_grace_period(tmp_path) -> None:
@@ -964,7 +1273,7 @@ def test_landed_flights_become_promotable_after_the_grace_period(tmp_path) -> No
         _airports(),
         airborne_at,
     )
-    landed_at = airborne_at + 901
+    landed_at = airborne_at + 2701
     monitor.assess(record, _observation(record, fetched_at=landed_at), _airports(), landed_at)
 
     assert monitor.landed_awaiting_done(landed_at + 1000) == []

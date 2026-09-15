@@ -35,9 +35,10 @@ from .models import (
 _LOGGER = logging.getLogger(__name__)
 
 WATCH_WINDOW_SECONDS = 6 * 60 * 60
-STALE_POSITION_SECONDS = 900
+STALE_POSITION_SECONDS = 2700
 PUSH_QUIET_SECONDS = 1800
 LANDING_GRACE_SECONDS = 1800.0
+MIN_ALERT_DELTA_MINUTES = 15
 
 
 def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEvent]:
@@ -48,6 +49,10 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
     flight_id = state.get("flight_id")
     event_flight_id = flight_id if isinstance(flight_id, str) else update.flight_number
     events: List[FlightEvent] = []
+    phase_at_entry = state.get("phase")
+    if phase_at_entry in ("landed", "done", "cancelled"):
+        _record_push(update, state, timestamp)
+        return events
     previous_status = state.get("status")
     status = update.status
     if (
@@ -116,9 +121,8 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
             logged_revisions.append(update.departure_revised)
     delay_bucket = _push_delay_bucket(delay_minutes)
     previous_bucket = state.get("push_delay_bucket")
-    # Only announce a departure revision the first time we see that value, so an
-    # A->B->A schedule flip does not re-alert on the return to A.
-    dep_is_new = update.departure_revised is not None and not revision_is_announced
+    dep_is_new = revised_changed
+    delay_emitted = False
     if (
         not suppress_revision
         and revised_changed
@@ -139,11 +143,20 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
             )
         )
         state["push_delay_bucket"] = delay_bucket
+        state["last_alerted_dep_revised"] = update.departure_revised
+        delay_emitted = True
+    departure_baseline = _state_string(state, "last_alerted_dep_revised")
+    departure_change_minutes = _minutes_between(
+        departure_baseline or departure_scheduled, update.departure_revised
+    )
     if (
         not suppress_revision
+        and not delay_emitted
         and dep_is_new
         and delay_minutes is not None
         and delay_minutes != 0
+        and departure_change_minutes is not None
+        and abs(departure_change_minutes) >= MIN_ALERT_DELTA_MINUTES
     ):
         if hedge_revision:
             message = _hedged_early_message(
@@ -163,6 +176,7 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
         events.append(
             FlightEvent(event_flight_id, "schedule_change", message, True, timestamp)
         )
+        state["last_alerted_dep_revised"] = update.departure_revised
     if (
         not suppress_revision
         and update.departure_revised is not None
@@ -173,15 +187,18 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
         update.arrival_revised is not None
         and state.get("arrival_revised") != update.arrival_revised
     )
-    arr_is_new = arrival_changed and update.arrival_revised not in announced_arr
+    arr_is_new = arrival_changed
     arrival_scheduled = update.arrival_scheduled or _state_string(
         state, "arrival_scheduled"
     )
-    arrival_change_minutes = _minutes_between(arrival_scheduled, update.arrival_revised)
+    arrival_baseline = _state_string(state, "last_alerted_arr_revised")
+    arrival_change_minutes = _minutes_between(
+        arrival_baseline or arrival_scheduled, update.arrival_revised
+    )
     if (
         arr_is_new
         and arrival_change_minutes is not None
-        and abs(arrival_change_minutes) >= 15
+        and abs(arrival_change_minutes) >= MIN_ALERT_DELTA_MINUTES
     ):
         events.append(
             FlightEvent(
@@ -197,6 +214,7 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
                 timestamp,
             )
         )
+        state["last_alerted_arr_revised"] = update.arrival_revised
     if update.arrival_revised is not None and update.arrival_revised not in announced_arr:
         announced_arr.append(update.arrival_revised)
     for field, label in (("departure_gate", "departure"), ("arrival_gate", "arrival")):
@@ -217,6 +235,13 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
                     timestamp,
                 )
             )
+    _record_push(update, state, timestamp)
+    return events
+
+
+def _record_push(
+    update: FlightUpdate, state: Dict[str, object], timestamp: float
+) -> None:
     for field in (
         "status",
         "departure_scheduled",
@@ -234,7 +259,6 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
             state[field] = value
     state["flight_number"] = update.flight_number
     state["last_push_epoch"] = timestamp
-    return events
 
 
 def update_timestamp() -> float:
@@ -471,8 +495,8 @@ class Monitor:
                     sent,
                     record,
                     "stale_data",
-                    "No position data for {}; delay unconfirmed and awaiting "
-                    "airline/FAA corroboration.".format(_context(record)),
+                    "{} is past its scheduled departure time with no confirmed "
+                    "departure.".format(_context(record)),
                     False,
                     now_epoch,
                     "watch_no_position",
@@ -505,8 +529,8 @@ class Monitor:
                 sent,
                 record,
                 "stale_data",
-                "Position data for {} has been stale for over 15 minutes.".format(
-                    _context(record)
+                "{} has not had a confirmed position for over {} minutes.".format(
+                    _context(record), STALE_POSITION_SECONDS // 60
                 ),
                 False,
                 now_epoch,
@@ -538,17 +562,13 @@ class Monitor:
             if (
                 isinstance(last_push, (int, float))
                 and now_epoch - last_push > PUSH_QUIET_SECONDS
+                and "push_stale" not in sent
             ):
-                _once(
-                    events,
-                    sent,
-                    record,
-                    "push_stale",
-                    "Push updates for {} have been quiet for over 30 minutes; "
-                    "polling is active.".format(_context(record)),
-                    False,
-                    now_epoch,
+                _LOGGER.warning(
+                    "push updates quiet; polling remains active",
+                    extra={"flight_id": record.flight_id},
                 )
+                sent.append("push_stale")
         self._write_state()
         return events
 
