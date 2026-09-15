@@ -1,0 +1,11 @@
+From: Frontier Airlines <trips@frontier.example.com>
+To: ember.heron@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Ember Heron
+Confirmation: FAKEF9
+Ticket Number: FAKE-TICKET-F9-0001
+Travel Date: 2026-12-02
+Flight: Frontier Airlines 418
+Route: DEN -> LAX

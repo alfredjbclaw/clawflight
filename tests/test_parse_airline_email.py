@@ -1,11 +1,128 @@
 """Airline email layout parsing against the synthetic fixtures."""
+import time
+
 import pytest
 
-from clawflight.parse import parse_airline_email
+from clawflight.models import polling_callsign
+from clawflight.parse import (
+    AIRLINE_NAME_TO_IATA,
+    KNOWN_CARRIERS,
+    parse_airline_email,
+)
 
 
 def _parse(fixtures, name, year=2026):
     return parse_airline_email((fixtures / name).read_text(encoding="utf-8"), year)
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "carrier", "number", "date", "route"),
+    [
+        ("email_united_generic.txt", "UA", 184, "2026-09-18", ("JFK", "SFO")),
+        ("email_jetblue_generic.txt", "B6", 611, "2026-10-03", ("BOS", "LAX")),
+        ("email_southwest_generic.txt", "WN", 925, "2026-11-07", ("DEN", "LGA")),
+        ("email_alaska_generic.txt", "AS", 332, "2026-11-12", ("SEA", "SFO")),
+        ("email_spirit_generic.txt", "NK", 707, "2026-11-19", ("LGA", "ORD")),
+        ("email_frontier_generic.txt", "F9", 418, "2026-12-02", ("DEN", "LAX")),
+        ("email_british_airways_generic.txt", "BA", 178, "2026-12-08", ("JFK", "LHR")),
+        ("email_air_france_generic.txt", "AF", 9, "2026-12-14", ("JFK", "CDG")),
+        ("email_lufthansa_generic.txt", "LH", 401, "2026-12-19", ("JFK", "FRA")),
+        ("email_emirates_generic.txt", "EK", 202, "2026-12-27", ("JFK", "DXB")),
+    ],
+)
+def test_generic_email_parses_known_airline(
+    fixtures, fixture_name, carrier, number, date, route
+) -> None:
+    flights = _parse(fixtures, fixture_name)
+
+    assert len(flights) == 1
+    assert (flights[0].leg.carrier, flights[0].leg.number, flights[0].leg.date) == (
+        carrier, number, date
+    )
+    assert (flights[0].leg.origin, flights[0].leg.dest) == route
+
+
+def test_delta_receipt_layout_resolves_a_united_carrier(fixtures) -> None:
+    text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    text = text.replace("DELTA", "United Airlines")
+
+    flights = parse_airline_email(text, 2026)
+
+    assert [(item.leg.carrier, item.leg.number) for item in flights] == [
+        ("UA", 667),
+        ("UA", 1226),
+    ]
+
+
+@pytest.mark.parametrize("token", ["US 100", "RE 2024"])
+def test_unknown_designator_in_prose_does_not_become_a_flight(token) -> None:
+    text = "\n".join([
+        "Confirmation: FAKEP1",
+        "Date: 2026-10-10",
+        "Flight: {}".format(token),
+        "Route: JFK -> LAX",
+    ])
+
+    assert parse_airline_email(text, 2026) == []
+
+
+def test_airline_name_mappings_are_known_designators() -> None:
+    assert set(AIRLINE_NAME_TO_IATA.values()) <= KNOWN_CARRIERS
+
+
+def test_generic_email_requires_date_and_route() -> None:
+    base = "Flight: United Airlines 184"
+
+    assert parse_airline_email(base + "\nRoute: JFK -> SFO", 2026) == []
+    assert parse_airline_email(base + "\nDate: 2026-09-18", 2026) == []
+
+
+def test_adversarial_near_matches_are_bounded_by_the_email_size_cap() -> None:
+    text = ("Flight: US 100 almost\n" * 9000)[:200_000]
+
+    started = time.monotonic()
+    assert parse_airline_email(text, 2026) == []
+    assert time.monotonic() - started < 2.0
+
+
+def test_explicit_operating_airline_without_number_is_partial_and_polls_marketed() -> None:
+    text = "\n".join([
+        "Confirmation: FAKEO1",
+        "Date: 2026-10-10",
+        "Flight: American Airlines 4912 operated by SkyWest Airlines as American Eagle",
+        "Route: JFK -> LAX",
+    ])
+
+    flight = parse_airline_email(text, 2026)[0].leg
+
+    assert (flight.operating_carrier, flight.operating_number) == ("OO", None)
+    assert polling_callsign(flight) == "AAL4912"
+
+
+def test_explicit_operating_flight_sets_both_operating_fields() -> None:
+    text = "\n".join([
+        "Confirmation: FAKEO2",
+        "Date: 2026-10-10",
+        "Flight: American Airlines 4912",
+        "Route: JFK -> LAX",
+        "OO 5678 operated by SkyWest Airlines",
+    ])
+
+    flight = parse_airline_email(text, 2026)[0].leg
+
+    assert (flight.operating_carrier, flight.operating_number) == ("OO", 5678)
+    assert polling_callsign(flight) == "OO5678"
+
+
+def test_email_without_operated_by_text_has_no_operating_identity() -> None:
+    flight = parse_airline_email("\n".join([
+        "Date: 2026-10-10",
+        "Flight: American Airlines 4912",
+        "Route: JFK -> LAX",
+        "Connection on SkyWest Airlines 5678",
+    ]), 2026)[0].leg
+
+    assert (flight.operating_carrier, flight.operating_number) == (None, None)
 
 
 def test_receipt_parses_each_day_and_deduplicates_repeated_flights(fixtures) -> None:

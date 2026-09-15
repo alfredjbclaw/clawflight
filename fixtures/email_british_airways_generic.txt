@@ -1,0 +1,11 @@
+From: British Airways <trips@britishairways.example.com>
+To: rowan.tern@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Rowan Tern
+Confirmation: FAKEBA
+Ticket Number: FAKE-TICKET-BA-0001
+Travel Date: 2026-12-08
+Flight: British Airways 178
+Route: JFK -> LHR

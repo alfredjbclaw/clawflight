@@ -1,0 +1,11 @@
+From: Spirit Airlines <trips@spirit.example.com>
+To: willow.swift@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Willow Swift
+Confirmation: FAKEN1
+Ticket Number: FAKE-TICKET-NK-0001
+Travel Date: 2026-11-19
+Flight: Spirit Airlines 707
+Route: LGA -> ORD

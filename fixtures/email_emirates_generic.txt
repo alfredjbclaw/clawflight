@@ -1,0 +1,11 @@
+From: Emirates <trips@emirates.example.com>
+To: sorrel.robin@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Sorrel Robin
+Confirmation: FAKEEK
+Ticket Number: FAKE-TICKET-EK-0001
+Travel Date: 2026-12-27
+Flight: Emirates 202
+Route: JFK -> DXB

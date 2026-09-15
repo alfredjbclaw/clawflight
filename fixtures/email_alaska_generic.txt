@@ -1,0 +1,11 @@
+From: Alaska Airlines <trips@alaska.example.com>
+To: cedar.finch@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Cedar Finch
+Confirmation: FAKEA4
+Ticket Number: FAKE-TICKET-AS-0001
+Travel Date: 2026-11-12
+Flight: Alaska Airlines 332
+Route: SEA -> SFO

@@ -1,0 +1,11 @@
+From: JetBlue <trips@jetblue.example.com>
+To: juniper.wren@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Juniper Wren
+Confirmation: FAKEB6
+Ticket Number: FAKE-TICKET-B6-0001
+Travel Date: 2026-10-03
+Flight: JetBlue 611
+Route: BOS -> LAX

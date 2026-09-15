@@ -1,0 +1,11 @@
+From: Southwest Airlines <trips@southwest.example.com>
+To: aspen.lark@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Aspen Lark
+Confirmation: FAKEW1
+Ticket Number: FAKE-TICKET-WN-0001
+Travel Date: 2026-11-07
+Flight: Southwest Airlines 925
+Route: DEN -> LGA

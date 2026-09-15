@@ -25,11 +25,29 @@ from .models import FlightLeg
 
 AIRLINE_NAME_TO_IATA = {
     "delta": "DL",
+    "delta air lines": "DL",
     "american": "AA",
+    "american airlines": "AA",
     "united": "UA",
+    "united airlines": "UA",
     "jetblue": "B6",
+    "jetblue airways": "B6",
     "southwest": "WN",
+    "southwest airlines": "WN",
     "alaska": "AS",
+    "alaska airlines": "AS",
+    "spirit": "NK",
+    "spirit airlines": "NK",
+    "frontier": "F9",
+    "frontier airlines": "F9",
+    "british airways": "BA",
+    "air france": "AF",
+    "lufthansa": "LH",
+    "emirates": "EK",
+    "skywest airlines": "OO",
+    "republic airways": "YX",
+    "envoy air": "MQ",
+    "endeavor air": "9E",
 }
 CITY_TO_IATA = {
     "aspen": "ASE",
@@ -75,6 +93,32 @@ KNOWN_CARRIERS = frozenset({
 })
 
 
+def _resolve_carrier(token: str) -> "Optional[str]":
+    """Resolve an airline name or validated IATA designator."""
+    if not isinstance(token, str):
+        return None
+    normalized = re.sub(r"\s+", " ", token).strip()
+    if not normalized:
+        return None
+    designator = normalized.upper()
+    if designator in KNOWN_CARRIERS:
+        return designator
+    return AIRLINE_NAME_TO_IATA.get(normalized.casefold())
+
+
+_EMAIL_CARRIER_PATTERN = "(?:{})".format(
+    "|".join(
+        re.escape(name)
+        for name in sorted(AIRLINE_NAME_TO_IATA, key=lambda value: (-len(value), value))
+    )
+)
+_EMAIL_CARRIER_TOKEN_PATTERN = "(?:{}|{})".format(
+    _EMAIL_CARRIER_PATTERN,
+    "|".join(re.escape(carrier) for carrier in sorted(KNOWN_CARRIERS)),
+)
+_EMAIL_OPERATED_SUFFIX = r"(?:\s+operated\s+by\s+.{1,100})?"
+
+
 def _build_timezones() -> "dict[str, str]":
     return {iata: airport.tz for iata, airport in default_airports().items()}
 
@@ -97,7 +141,7 @@ FIELD_RE = re.compile(r"^  (?P<key>[A-Za-z]+):\s*(?P<value>.*)$")
 TITLE_RE = re.compile(r"^  (?P<title>\S.*)$")
 TIME_RE = re.compile(r"\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b", re.IGNORECASE)
 AIRLINE_RE = re.compile(
-    r"\b(Flight|Airlines?|Delta|American|United|JetBlue|Southwest|Alaska)\b",
+    r"\b(?:Flight|Airlines?|{})\b".format(_EMAIL_CARRIER_PATTERN),
     re.IGNORECASE,
 )
 
@@ -132,6 +176,7 @@ def parse_airline_email(text: str, default_year: int) -> "list[ParsedFlight]":
             and re.search(r"\bYour New Flight Info\b", text, re.IGNORECASE)
         ):
             return _parse_schedule_change_email(text, default_year)
+        return _parse_generic_email(text, default_year)
     except (OverflowError, TypeError, ValueError):
         # Mail bodies are untrusted input. A damaged date or a caller-supplied
         # year must not stop ingestion of the rest of the mailbox.
@@ -157,9 +202,14 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
         hints["passenger_name"] = re.sub(r"\s+", " ", passenger.group(1)).strip()
 
     seats = {
-        int(match.group(1)): match.group(2).upper()
+        (_resolve_carrier(match.group("carrier")), int(match.group("number"))):
+        match.group("seat").upper()
         for match in re.finditer(
-            r"(?im)^\s*DELTA\s+(\d{1,4})\s+(\d{1,2}[A-F])\s*$", text
+            r"(?im)^\s*(?P<carrier>{})\s+(?P<number>\d{{1,4}})\s+"
+            r"(?P<seat>\d{{1,2}}[A-F])\s*$".format(
+                _EMAIL_CARRIER_TOKEN_PATTERN
+            ),
+            text,
         )
     }
     day_headers = list(
@@ -181,10 +231,19 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
             continue
         end = day_headers[index + 1].start() if index + 1 < len(day_headers) else len(text)
         section = text[header.end() : end]
-        flights = list(re.finditer(r"(?im)^\s*DELTA\s+(\d{1,4})\s*$", section))
+        flights = list(re.finditer(
+            r"(?im)^\s*(?P<carrier>{})\s+(?P<number>\d{{1,4}}){}\s*$".format(
+                _EMAIL_CARRIER_TOKEN_PATTERN,
+                _EMAIL_OPERATED_SUFFIX,
+            ),
+            section,
+        ))
         for flight_index, flight in enumerate(flights):
-            number = int(flight.group(1))
-            key = ("DL", number, date)
+            carrier = _resolve_carrier(flight.group("carrier"))
+            if carrier is None:
+                continue
+            number = int(flight.group("number"))
+            key = (carrier, number, date)
             if key in seen:
                 continue
             flight_end = (
@@ -207,11 +266,15 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
             dest = _airline_email_city(destination) if destination else None
             dep_time = _clock_value(dep_field)
             arr_time = _clock_value(lines[2]) if len(lines) > 2 else None
+            operating_carrier, operating_number = _operating_identity(
+                section[flight.start():flight_end]
+            )
             parsed.append(
                 _airline_parsed_flight(
-                    "DL", number, date, origin, dest,
+                    carrier, number, date, origin, dest,
                     dep_time, arr_time,
-                    confirmation.group(1).upper(), seats.get(number), hints,
+                    confirmation.group(1).upper(), seats.get((carrier, number)), hints,
+                    operating_carrier, operating_number,
                 )
             )
             seen.add(key)
@@ -246,10 +309,19 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
     for index, date_match in enumerate(dates):
         end = dates[index + 1].start() if index + 1 < len(dates) else len(text)
         block = text[date_match.end() : end]
-        carrier = re.search(r"(?im)^\s*(American Airlines)\s+(\d{1,4})\s*$", block)
+        carrier_match = re.search(
+            r"(?im)^\s*(?P<carrier>{})\s+(?P<number>\d{{1,4}}){}\s*$".format(
+                _EMAIL_CARRIER_TOKEN_PATTERN,
+                _EMAIL_OPERATED_SUFFIX,
+            ),
+            block,
+        )
+        if carrier_match is None:
+            continue
+        carrier = _resolve_carrier(carrier_match.group("carrier"))
         if carrier is None:
             continue
-        prefix = block[: carrier.start()]
+        prefix = block[: carrier_match.start()]
         airports = list(re.finditer(r"(?im)^\s*([A-Z]{3})\s*$", prefix))
         if len(airports) < 2:
             continue
@@ -266,16 +338,18 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
             continue
         seat_match = re.search(
             r"(?im)^\s*Seats?:\s*(\d{1,2}[A-F])\s*$",
-            block[carrier.end() :],
+            block[carrier_match.end() :],
         )
+        operating_carrier, operating_number = _operating_identity(block)
         parsed.append(
             _airline_parsed_flight(
-                "AA", int(carrier.group(2)), date,
+                carrier, int(carrier_match.group("number")), date,
                 airports[0].group(1), airports[1].group(1),
                 dep_time, arr_time,
                 confirmation.group(1).upper(),
                 seat_match.group(1).upper() if seat_match else None,
                 hints,
+                operating_carrier, operating_number,
             )
         )
     return parsed
@@ -295,9 +369,12 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
     if original_info:
         new_section = new_section[: original_info.start()]
     heading = re.search(
-        r"(?im)^\s*(?P<carrier>Delta)\s+(?P<number>\d{1,4})\s*$\s*"
+        r"(?im)^\s*(?P<carrier>{})\s+(?P<number>\d{{1,4}}){}\s*$\s*"
         r"^\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*"
-        r"(?P<month>[A-Z][a-z]+)\s+(?P<day>\d{1,2})\s*$",
+        r"(?P<month>[A-Z][a-z]+)\s+(?P<day>\d{{1,2}})\s*$".format(
+            _EMAIL_CARRIER_TOKEN_PATTERN,
+            _EMAIL_OPERATED_SUFFIX,
+        ),
         new_section,
     )
     if heading is None:
@@ -317,16 +394,225 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
         ).date().isoformat()
     except (OverflowError, ValueError):
         return []
+    carrier = _resolve_carrier(heading.group("carrier"))
+    if carrier is None:
+        return []
+    operating_carrier, operating_number = _operating_identity(new_section)
     return [
         _airline_parsed_flight(
-            "DL", int(heading.group("number")), date,
+            carrier, int(heading.group("number")), date,
             _airline_email_city(cities[0].group(1)),
             _airline_email_city(cities[1].group(1)),
             dep_time, arr_time,
             confirmation.group(1).upper(), None,
             {"notes_excerpt": "Your flight changed"},
+            operating_carrier, operating_number,
         )
     ]
+
+
+def _parse_generic_email(text: str, default_year: int) -> "list[ParsedFlight]":
+    """Parse strict line-oriented itinerary blocks not covered by known layouts."""
+    lines = text.splitlines()
+    flights = []
+    for index, line in enumerate(lines):
+        identity = _generic_flight_identity(line)
+        if identity is not None:
+            flights.append((index, identity))
+    parsed = []
+    seen = set()
+    confirmation = _generic_confirmation(text)
+    for position, (index, (carrier, number)) in enumerate(flights):
+        lower = max(0, flights[position - 1][0] + 1 if position else index - 12)
+        blank_lines = [
+            line_index
+            for line_index in range(lower, index)
+            if not lines[line_index].strip()
+        ]
+        if blank_lines:
+            lower = blank_lines[-1] + 1
+        upper = min(
+            len(lines),
+            flights[position + 1][0]
+            if position + 1 < len(flights)
+            else index + 13,
+        )
+        candidates = [
+            (abs(line_index - index), line_index, line_value)
+            for line_index, line_value in enumerate(lines[lower:upper], lower)
+        ]
+        dates = [
+            (distance, line_index, parsed_date)
+            for distance, line_index, line_value in candidates
+            if (parsed_date := _generic_date(line_value, default_year)) is not None
+        ]
+        routes = [
+            (distance, line_index, parsed_route)
+            for distance, line_index, line_value in candidates
+            if line_index >= index
+            if (parsed_route := _generic_route(line_value)) is not None
+        ]
+        date = min(dates)[2] if dates else None
+        route = min(routes)[2] if routes else None
+        if route is None:
+            route = _generic_from_to(lines, index, upper, index)
+        if date is None or route is None:
+            continue
+        key = (carrier, number, date, route)
+        if key in seen:
+            continue
+        block = "\n".join(lines[index:upper])
+        operating_carrier, operating_number = _operating_identity(block)
+        parsed.append(
+            _airline_parsed_flight(
+                carrier,
+                number,
+                date,
+                route[0],
+                route[1],
+                None,
+                None,
+                confirmation,
+                None,
+                {},
+                operating_carrier,
+                operating_number,
+            )
+        )
+        seen.add(key)
+    return parsed
+
+
+def _generic_flight_identity(line: str) -> "Optional[tuple[str, int]]":
+    if len(line) > 200:
+        return None
+    if re.fullmatch(
+        r"\s*[A-Z0-9]{2}\s*-?\s*\d{1,4}\s+operated\s+by\s+.{1,100}\s*",
+        line,
+        re.IGNORECASE,
+    ):
+        return None
+    suffix = r"(?:\s+operated\s+by\s+.{1,80})?"
+    named = re.fullmatch(
+        r"\s*(?:Flight(?:\s+number)?\s*:?\s*)?"
+        r"(?P<carrier>{})(?:\s+(?:Flight\s*)?"
+        r"(?:(?P<designator>[A-Z][A-Z0-9]|[0-9][A-Z])\s+)?)"
+        r"(?P<number>\d{{1,4}}){}\s*".format(_EMAIL_CARRIER_PATTERN, suffix),
+        line,
+        re.IGNORECASE,
+    )
+    bare = re.fullmatch(
+        r"\s*(?:Flight(?:\s+number)?\s*:?\s*)?"
+        r"(?P<carrier>[A-Z0-9]{{2}})\s*-?\s*(?P<number>\d{{1,4}}){}\s*".format(suffix),
+        line,
+        re.IGNORECASE,
+    )
+    match = named or bare
+    if match is None:
+        return None
+    carrier = _resolve_carrier(match.group("carrier"))
+    designator = match.groupdict().get("designator")
+    if designator and _resolve_carrier(designator) != carrier:
+        return None
+    return (carrier, int(match.group("number"))) if carrier else None
+
+
+def _generic_date(line: str, default_year: int) -> "Optional[str]":
+    if len(line) > 120:
+        return None
+    match = re.fullmatch(
+        r"\s*(?:(?:Travel|Departure|Service)\s+)?Date\s*:\s*(.{1,40})\s*|\s*(.{1,40})\s*",
+        line,
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    value = (match.group(1) or match.group(2)).strip()
+    value = re.sub(r"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?[,]?\s+", "", value,
+                   flags=re.IGNORECASE)
+    for format_string in ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%B %d", "%b %d"):
+        try:
+            parsed = datetime.strptime(value, format_string)
+            year = parsed.year if "%Y" in format_string else default_year
+            return parsed.date().replace(year=year).isoformat()
+        except (OverflowError, ValueError):
+            continue
+    return None
+
+
+def _generic_route(line: str) -> "Optional[tuple[Optional[str], Optional[str]]]":
+    if len(line) > 180:
+        return None
+    match = re.fullmatch(
+        r"\s*(?:Route\s*:\s*)?(?P<origin>[A-Z]{3})\s*(?:to|->|→|–)\s*"
+        r"(?P<dest>[A-Z]{3})\s*",
+        line,
+        re.IGNORECASE,
+    )
+    return (match.group("origin").upper(), match.group("dest").upper()) if match else None
+
+
+def _generic_from_to(lines, lower: int, upper: int, flight_index: int):
+    endpoints = []
+    for index in range(lower, upper):
+        if len(lines[index]) > 100:
+            continue
+        match = re.fullmatch(
+            r"\s*(From|Origin|To|Destination)\s*:\s*([A-Z]{3})\s*",
+            lines[index],
+            re.IGNORECASE,
+        )
+        if match:
+            kind = "from" if match.group(1).casefold() in {"from", "origin"} else "to"
+            endpoints.append((abs(index - flight_index), kind, match.group(2).upper()))
+    origins = sorted(item for item in endpoints if item[1] == "from")
+    destinations = sorted(item for item in endpoints if item[1] == "to")
+    return (origins[0][2], destinations[0][2]) if origins and destinations else None
+
+
+def _generic_confirmation(text: str) -> "Optional[str]":
+    for line in text.splitlines():
+        if len(line) > 120:
+            continue
+        match = re.fullmatch(
+            r"\s*(?:Confirmation(?:\s+(?:code|number))?|Record locator|Booking reference)"
+            r"\s*[:#]\s*([A-Z0-9]{5,8})\s*", line, re.IGNORECASE
+        )
+        if match:
+            return match.group(1).upper()
+    return None
+
+
+def _operating_identity(text: str) -> "tuple[Optional[str], Optional[int]]":
+    for line in text.splitlines():
+        if len(line) > 240:
+            continue
+        match = re.fullmatch(
+            r"\s*(?:(?P<prefix>.{{1,100}}?)\s+)?"
+            r"Operated\s+by\s+(?P<carrier>{})(?:\s+as\s+.{{1,80}})?\s*".format(
+                _EMAIL_CARRIER_TOKEN_PATTERN
+            ),
+            line,
+            re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        carrier = _resolve_carrier(match.group("carrier"))
+        explicit_flight = re.fullmatch(
+            r"\s*([A-Z0-9]{2})\s*-?\s*(\d{1,4})\s*",
+            match.group("prefix") or "",
+            re.IGNORECASE,
+        )
+        explicit = (
+            _resolve_carrier(explicit_flight.group(1)) if explicit_flight else None
+        )
+        number = (
+            int(explicit_flight.group(2))
+            if explicit_flight and explicit == carrier and carrier
+            else None
+        )
+        return carrier, number
+    return None, None
 
 
 def _clock_value(value: "Optional[str]") -> "Optional[str]":
@@ -370,6 +656,8 @@ def _airline_parsed_flight(
     conf_code: "Optional[str]",
     seat: "Optional[str]",
     hints: dict,
+    operating_carrier: "Optional[str]" = None,
+    operating_number: "Optional[int]" = None,
 ) -> ParsedFlight:
     return ParsedFlight(
         leg=FlightLeg(
@@ -383,6 +671,8 @@ def _airline_parsed_flight(
             sched_arr_iso=_time_to_iso(date, arr_time, dest),
             conf_code=conf_code,
             seat=seat,
+            operating_carrier=operating_carrier,
+            operating_number=operating_number,
         ),
         hints=dict(hints),
     )
@@ -567,15 +857,17 @@ def _designators(title: str, notes: str) -> "list[tuple[str, int]]":
         )
         if flight_numbers:
             return [
-                (carrier, int(value))
+                (_resolve_carrier(carrier), int(value))
                 for value in re.findall(r"\d{1,4}", flight_numbers.group(1))
+                if _resolve_carrier(carrier) is not None
             ]
         after_airline = combined[airline.end() : airline.end() + 80]
         number = re.search(
             r"\b(?:Flight\s*:?[ ]*)?(\d{1,4})\b", after_airline, re.IGNORECASE
         )
         if number:
-            return [(carrier, int(number.group(1)))]
+            resolved = _resolve_carrier(carrier)
+            return [(resolved, int(number.group(1)))] if resolved else []
     return _explicit_designators(notes)
 
 

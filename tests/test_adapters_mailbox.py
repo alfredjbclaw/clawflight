@@ -193,7 +193,12 @@ def test_an_explicit_policy_object_is_accepted_by_both_pipelines(fixtures) -> No
     parsed = messages_to_parsed_flights(messages, policy, 2026)
 
     assert len(candidates) == 3
-    assert parsed == []
+    assert [(item.leg.carrier, item.leg.number, item.leg.origin, item.leg.dest)
+            for item in parsed] == [
+        ("DL", 248, "JFK", "LAX"),
+        ("UA", 410, "EWR", "ORD"),
+        ("UA", 882, "ORD", "SFO"),
+    ]
 
 
 # -- the IMAP adapter -------------------------------------------------------

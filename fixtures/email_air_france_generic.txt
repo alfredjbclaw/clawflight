@@ -1,0 +1,11 @@
+From: Air France <trips@airfrance.example.com>
+To: maple.crane@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Maple Crane
+Confirmation: FAKEAF
+Ticket Number: FAKE-TICKET-AF-0001
+Travel Date: 2026-12-14
+Flight: Air France 9
+Route: JFK -> CDG

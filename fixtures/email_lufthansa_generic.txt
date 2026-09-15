@@ -1,0 +1,11 @@
+From: Lufthansa <trips@lufthansa.example.com>
+To: briar.sparrow@example.com
+Subject: Fictional trip itinerary
+
+SYNTHETIC FIXTURE — all details are invented.
+Passenger: Briar Sparrow
+Confirmation: FAKELH
+Ticket Number: FAKE-TICKET-LH-0001
+Travel Date: 2026-12-19
+Flight: Lufthansa 401
+Route: JFK -> FRA
