@@ -7,6 +7,8 @@ message is sent; it is never retained by the poster.
 from __future__ import annotations
 
 import os
+import re
+from email.header import Header
 from typing import Callable, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -16,6 +18,13 @@ from ..notify import NotificationPriority
 
 DEFAULT_BASE_URL = "https://ntfy.sh"
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+# Alert text carries the marketed flight number. Keep the ntfy title short and
+# useful rather than copying its emoji-prefixed text.
+_FLIGHT_IDENTIFIER = re.compile(
+    r"(?<![A-Z0-9])(?=[A-Z0-9]{2,3}\d{1,4}\b)(?=[A-Z0-9]*[A-Z])"
+    r"([A-Z0-9]{2,3}\d{1,4})\b"
+)
 
 # An opener receives the complete request and its explicit timeout, then
 # returns the HTTP status. Keeping it this small makes the edge injectable.
@@ -57,8 +66,8 @@ class NtfyPoster:
             "Content-Type": "text/plain; charset=utf-8",
             "Priority": "4" if priority == "critical" else "3",
         }
-        title = self.title if self.title is not None else text.split("\n", 1)[0]
-        _add_ascii_header(headers, "Title", title)
+        title = self.title if self.title is not None else _title_from_text(text)
+        _add_title_header(headers, title)
         _add_ascii_header(headers, "Tags", self.tags)
         if self.token_env:
             token = os.environ.get(self.token_env)
@@ -102,3 +111,24 @@ def _add_ascii_header(headers: dict, name: str, value: Optional[str]) -> None:
     except UnicodeEncodeError:
         return
     headers[name] = value
+
+
+def _title_from_text(text: str) -> Optional[str]:
+    """Return the first short flight identifier present in an alert."""
+    match = _FLIGHT_IDENTIFIER.search(text)
+    return match.group(1) if match is not None else None
+
+
+def _add_title_header(headers: dict, title: Optional[str]) -> None:
+    """Add a non-empty title, encoding non-ASCII values for HTTP transport."""
+    if title is None or not title.strip() or "\r" in title or "\n" in title:
+        return
+    try:
+        title.encode("ascii")
+    except UnicodeEncodeError:
+        encoded = Header(title, "utf-8").encode(linesep=" ")
+        if "\r" in encoded or "\n" in encoded:
+            return
+        headers["Title"] = encoded
+        return
+    headers["Title"] = title
