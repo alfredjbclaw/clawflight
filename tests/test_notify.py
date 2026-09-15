@@ -1,6 +1,9 @@
 """Message composition: priority, context, links, trip cards, arrival posts."""
+import json
+
 from clawflight.models import FlightEvent, PersonRef
 from clawflight.notify import (
+    DeliveryOutbox,
     FakePoster,
     MessageCap,
     classify,
@@ -154,6 +157,59 @@ def test_fake_poster_records_calls() -> None:
 
     assert poster.post("Flight update") is True
     assert poster.calls == ["Flight update"]
+
+
+def test_outbox_entry_priority_defaults_and_is_set_from_event(tmp_path) -> None:
+    outbox = DeliveryOutbox(str(tmp_path / "outbox.json"))
+    info = outbox.enqueue(
+        FlightEvent("AA4912-2026-07-11", "takeoff", "Airborne", True, 1.0), make_record()
+    )
+    critical = outbox.enqueue(
+        FlightEvent("AA4912-2026-07-11", "delay", "Delayed", True, 2.0), make_record()
+    )
+
+    assert info.priority == "info"
+    assert critical.priority == "critical"
+    reloaded = DeliveryOutbox(str(tmp_path / "outbox.json")).entries()
+    assert {entry.delivery_id: entry.priority for entry in reloaded} == {
+        info.delivery_id: "info",
+        critical.delivery_id: "critical",
+    }
+
+
+def test_legacy_outbox_entry_loads_with_info_priority(tmp_path) -> None:
+    path = tmp_path / "outbox.json"
+    path.write_text(
+        json.dumps(
+            {"deliveries": {"old": {
+                "delivery_id": "old", "event_key": "event", "flight_id": "AA1",
+                "text": "Update", "state": "pending", "attempts": 0,
+                "created_at_epoch": 1.0, "updated_at_epoch": 1.0,
+            }}}
+        )
+    )
+
+    assert DeliveryOutbox(str(path)).entries()[0].priority == "info"
+
+
+def test_outbox_passes_entry_priority_to_poster(tmp_path) -> None:
+    class CapturingPoster:
+        def __init__(self) -> None:
+            self.priorities = []
+
+        def post(self, text: str, priority: str = "info") -> bool:
+            self.priorities.append(priority)
+            return True
+
+    outbox = DeliveryOutbox(str(tmp_path / "outbox.json"))
+    outbox.enqueue(
+        FlightEvent("AA4912-2026-07-11", "delay", "Delayed", True, 1.0), make_record()
+    )
+    poster = CapturingPoster()
+
+    outbox.deliver_pending(poster, 2.0)
+
+    assert poster.priorities == ["critical"]
 
 
 def test_message_cap_limits_each_priority_per_flight() -> None:

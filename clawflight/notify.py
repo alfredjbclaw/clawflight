@@ -45,7 +45,7 @@ CRITICAL_KINDS = frozenset(
 
 
 class Poster(Protocol):
-    def post(self, text: str) -> bool: ...
+    def post(self, text: str, priority: "NotificationPriority" = "info") -> bool: ...
 
 
 class FakePoster:
@@ -54,7 +54,8 @@ class FakePoster:
     def __init__(self) -> None:
         self.calls: List[str] = []
 
-    def post(self, text: str) -> bool:
+    def post(self, text: str, priority: "NotificationPriority" = "info") -> bool:
+        del priority
         self.calls.append(text)
         return True
 
@@ -192,6 +193,7 @@ class OutboxEntry:
     updated_at_epoch: float
     recipient: str = DEFAULT_RECIPIENT
     last_error: Optional[str] = None
+    priority: "NotificationPriority" = "info"
 
     @property
     def retryable(self) -> bool:
@@ -241,6 +243,7 @@ class DeliveryOutbox:
                 created_at_epoch=event.at_epoch,
                 updated_at_epoch=event.at_epoch,
                 recipient=recipient,
+                priority=classify(event),
             )
             self._entries[delivery_id] = entry
             self._write()
@@ -340,7 +343,7 @@ class DeliveryOutbox:
                     self.fail(entry.delivery_id, "no poster for recipient", now_epoch)
                     failed.append(entry.delivery_id)
                     continue
-                acknowledged = entry_poster.post(entry.text)
+                acknowledged = entry_poster.post(entry.text, priority=entry.priority)
             except Exception as exc:  # noqa: BLE001 - adapters may raise anything
                 self.fail(entry.delivery_id, str(exc), now_epoch)
                 failed.append(entry.delivery_id)
@@ -385,6 +388,7 @@ class DeliveryOutbox:
                     updated_at_epoch=data.get("updated_at_epoch", 0.0),
                     recipient=data.get("recipient", DEFAULT_RECIPIENT),
                     last_error=data.get("last_error"),
+                    priority=data.get("priority", "info"),
                 )
             except (TypeError, ValueError):
                 continue

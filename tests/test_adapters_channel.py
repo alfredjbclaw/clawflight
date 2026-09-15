@@ -11,6 +11,7 @@ from clawflight.adapters.channel_openclaw import (
     poster_router,
     subprocess_runner,
 )
+from clawflight.adapters.channel_ntfy import NtfyPoster
 from clawflight.recipients import RecipientConfig
 
 
@@ -37,6 +38,16 @@ CONFIG = RecipientConfig.from_entries(
             "key": "sam",
             "name": "Sam",
             "channel": {"channel": "whatsapp", "to": "+15550000000"},
+        },
+        {
+            "key": "ntfy",
+            "name": "Ntfy",
+            "channel": {"channel": "ntfy", "to": "https://ntfy.example.com/demo-topic"},
+        },
+        {
+            "key": "unknown",
+            "name": "Unknown",
+            "channel": {"channel": "carrier-pigeon", "to": "roost"},
         },
         {"key": "robin", "name": "Robin"},
     ]
@@ -101,6 +112,14 @@ def test_poster_for_recipient_returns_none_without_a_target() -> None:
 
     assert poster_for_recipient(CONFIG.get("alex"), runner=runner) is not None
     assert poster_for_recipient(CONFIG.get("robin"), runner=runner) is None
+
+
+def test_poster_dispatches_ntfy_and_keeps_other_channels_on_openclaw() -> None:
+    runner = _RecordingRunner()
+
+    assert isinstance(poster_for_recipient(CONFIG.get("ntfy"), runner=runner), NtfyPoster)
+    assert isinstance(poster_for_recipient(CONFIG.get("sam"), runner=runner), OpenClawPoster)
+    assert isinstance(poster_for_recipient(CONFIG.get("unknown"), runner=runner), OpenClawPoster)
 
 
 def test_the_router_resolves_each_recipient_to_its_own_channel() -> None:

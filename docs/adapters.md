@@ -81,7 +81,7 @@ small module in your own workspace that imports `clawflight` and calls
 
 ```python
 class Poster(Protocol):
-    def post(self, text: str) -> bool: ...
+    def post(self, text: str, priority: "NotificationPriority" = "info") -> bool: ...
 ```
 
 Return `True` only when the message is genuinely accepted. `False` or an
@@ -89,11 +89,51 @@ exception marks the delivery failed, and the outbox retries it with exponential
 backoff. Do **not** implement retry inside a poster — that is the outbox's job,
 and duplicating it produces duplicate messages.
 
-### Shipped poster
+### Shipped posters
 
-`adapters.channel_openclaw.OpenClawPoster` shells out to `openclaw message
-send`, which covers every OpenClaw channel. The argv is a list and there is no
-shell, so message text is never interpretable as a command.
+Choose a channel per recipient. The existing generic recipient command also
+accepts ntfy without new CLI surface: `clawflight recipient add --channel ntfy
+--to <url-or-topic>`.
+
+```json
+{
+  "key": "alex",
+  "name": "Alex",
+  "channel": {
+    "channel": "telegram",
+    "to": "-1001234567890:topic:42",
+    "thread_id": "42"
+  }
+}
+```
+
+Any non-`ntfy` channel uses
+`adapters.channel_openclaw.OpenClawPoster`, which shells out to `openclaw
+message send`. The argv is a list and there is no shell, so message text is
+never interpretable as a command. `thread_id` is optional; omit it when the
+channel does not use threads.
+
+```json
+{
+  "key": "sam",
+  "name": "Sam",
+  "channel": {
+    "channel": "ntfy",
+    "to": "family",
+    "base_url": "https://ntfy.example.com",
+    "token_env": "CLAWFLIGHT_NTFY_TOKEN",
+    "title": "Flight update",
+    "tags": "airplane"
+  }
+}
+```
+
+`adapters.channel_ntfy.NtfyPoster` posts with `urllib.request`. Its `to` may
+be a full `http(s)` topic URL, or a bare topic joined to `base_url`; bare topics
+default to `https://ntfy.sh`. `base_url` is optional. `token_env` is optional
+and names an environment variable: put only the variable name in config, never
+the token value. `title` and `tags` are optional ntfy headers. The poster sends
+priority 4 for critical alerts and 3 for informational alerts.
 
 ```python
 from clawflight.adapters.channel_openclaw import poster_router
@@ -112,7 +152,7 @@ class WebhookPoster:
     def __init__(self, url: str, session):
         self.url, self.session = url, session
 
-    def post(self, text: str) -> bool:
+    def post(self, text: str, priority="info") -> bool:
         try:
             response = self.session.post(self.url, json={"text": text}, timeout=10)
         except Exception:

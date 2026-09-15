@@ -24,7 +24,7 @@ every blob in publishable history, and both must stay clean.
 
 The core never talks to a mailbox, a chat network, or an HTTP endpoint directly. It
 talks to two small interfaces: `MailboxAdapter` (yields `MailboxMessage`) and `Poster`
-(one `post(text) -> bool`). Every adapter takes its transport as an injected callable
+(one `post(text, priority="info") -> bool`). Every adapter takes its transport as an injected callable
 with a default:
 
 * `OpenClawPoster(runner=...)` — a `Runner` is `(argv, timeout) -> int`.

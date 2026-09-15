@@ -16,12 +16,12 @@ def _event(flight_id: str = "AA4912-2026-07-11", kind: str = "takeoff") -> Fligh
 
 
 class _AlwaysFails:
-    def post(self, text: str) -> bool:
+    def post(self, text: str, priority: str = "info") -> bool:
         raise RuntimeError("channel unavailable")
 
 
 class _Rejects:
-    def post(self, text: str) -> bool:
+    def post(self, text: str, priority: str = "info") -> bool:
         return False
 
 

@@ -5,7 +5,7 @@ to these two small interfaces:
 
 * :class:`~clawflight.adapters.mailbox.MailboxAdapter` — yields
   :class:`~clawflight.adapters.mailbox.MailboxMessage` values.
-* :class:`~clawflight.notify.Poster` — one ``post(text) -> bool`` method.
+* :class:`~clawflight.notify.Poster` — one ``post(text, priority="info") -> bool`` method.
 
 Anything satisfying them works, which is how personal integrations stay out of
 this repository. See ``docs/adapters.md``.

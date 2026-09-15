@@ -1,9 +1,9 @@
 """Recipient configuration and per-flight subscription routing.
 
 A recipient carries a channel-agnostic destination: ``{"channel": "telegram",
-"to": "-100…:topic:42"}``. Anything ``openclaw message send`` accepts is a valid
-target, so the same config works for Telegram, iMessage, WhatsApp, Discord,
-Slack, Signal, Matrix, and every channel plugin.
+"to": "-100…:topic:42"}`` or ``{"channel": "ntfy", "to": "topic"}``.
+OpenClaw targets work for Telegram, iMessage, WhatsApp, Discord, Slack, Signal,
+Matrix, and every channel plugin. ntfy also accepts ``base_url`` and ``token_env``.
 
 The default configuration is EMPTY. A fresh install notifies nobody until the
 user names recipients.
