@@ -17,6 +17,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from html.parser import HTMLParser
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -173,6 +174,94 @@ AIRLINE_EMAIL_CITY_TO_IATA = {
 }
 MAX_AIRLINE_EMAIL_BYTES = 256 * 1024
 
+
+class _StructuralHTMLTextParser(HTMLParser):
+    """Render HTML as text without erasing table structure."""
+
+    _BLOCKS = frozenset({
+        "address", "article", "aside", "blockquote", "div", "footer", "h1", "h2",
+        "h3", "h4", "h5", "h6", "header", "li", "main", "nav", "p", "section",
+    })
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.cell_depth = 0
+        self.row_open = False
+        self.hidden_depth = 0
+
+    def _boundary(self, value: str) -> None:
+        if self.parts and not self.parts[-1].endswith((" ", "\t", "\n")):
+            self.parts.append(value)
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.casefold()
+        if tag in {"script", "style"}:
+            self.hidden_depth += 1
+        elif tag in {"td", "th"}:
+            # HTML permits td/th end tags to be omitted. A new cell therefore
+            # closes the current one and must emit the same separator as an
+            # explicit closing tag.
+            if self.cell_depth:
+                self.parts.append("\t")
+            self.cell_depth = 1
+        elif tag == "tr":
+            # A new row also implies closure of the prior cell and row.
+            if self.row_open:
+                self.parts.append("\n")
+            else:
+                self._boundary("\n")
+            self.cell_depth = 0
+            self.row_open = True
+        elif tag == "br" or tag in self._BLOCKS:
+            self._boundary(" " if self.cell_depth else "\n")
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.casefold()
+        if tag in {"script", "style"}:
+            self.hidden_depth = max(0, self.hidden_depth - 1)
+        elif tag in {"td", "th"}:
+            self.cell_depth = max(0, self.cell_depth - 1)
+            self.parts.append("\t")
+        elif tag == "tr":
+            self.parts.append("\n")
+            self.cell_depth = 0
+            self.row_open = False
+        elif tag == "table":
+            if self.row_open:
+                self.parts.append("\n")
+            self.cell_depth = 0
+            self.row_open = False
+        elif tag in self._BLOCKS:
+            self._boundary(" " if self.cell_depth else "\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.hidden_depth:
+            self.parts.append(data)
+
+
+def _strip_html(html: str) -> str:
+    """Return bounded text with table cells separated by tabs and rows by lines."""
+    if not isinstance(html, str) or not html:
+        return ""
+    parser = _StructuralHTMLTextParser()
+    try:
+        parser.feed(html[:MAX_AIRLINE_EMAIL_BYTES])
+        parser.close()
+    except (AssertionError, TypeError, ValueError):
+        return ""
+    lines = []
+    for raw_line in "".join(parser.parts).splitlines():
+        cells = [re.sub(r"[ \f\r\v]+", " ", cell).strip() for cell in raw_line.split("\t")]
+        line = "\t".join(cell for cell in cells if cell)
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
 # Known IATA carrier designators. Used to reject prose matches like "US 100":
 # a bare two-letter token followed by digits is only a flight when the token is
 # a designator we actually recognise.
@@ -286,7 +375,14 @@ def parse_airline_email(text: str, default_year: int) -> "list[ParsedFlight]":
     ):
         return []
     try:
-        if re.search(r"\*\*\s*Confirmation Number\s*\*\*", text, re.IGNORECASE):
+        if (
+            re.search(r"(?im)^\s*(?:\*+\s*)?Confirmation Number\b", text)
+            and re.search(
+                r"(?im)^\s*(?:\*+\s*)?[A-Z]{3},\s*\d{1,2}[A-Z]+"
+                r"(?:\*+|\t|\s)+DEPART(?:\*+|\t|\s)+ARRIVE",
+                text,
+            )
+        ):
             return _parse_receipt(text, default_year)
         if re.search(r"\bYour trip confirmation and receipt\b", text, re.IGNORECASE):
             return _parse_trip_confirmation(text)
@@ -305,18 +401,22 @@ def parse_airline_email(text: str, default_year: int) -> "list[ParsedFlight]":
 
 def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
     confirmation = re.search(
-        r"\*\*\s*Confirmation Number\s*\*\*\s*([A-Z0-9]{5,8})\b",
+        r"(?im)^\s*(?:\*+\s*)?Confirmation Number\s*(?:\*+\s*)?"
+        r"(?:[:#]\s*)?([A-Z0-9]{5,8})\b",
         text,
         re.IGNORECASE,
     )
     if confirmation is None:
         return []
     passenger_header = re.search(
-        r"(?im)^\s*\*\*\s*Passenger Info\s*\*\*\s*$", text
+        r"(?im)^\s*(?:\*+\s*)?Passenger Info\s*(?:\*+)?\s*$", text
     )
     passengers = []
     if passenger_header:
-        next_header = re.search(r"(?m)^\s*\*\*", text[passenger_header.end() :])
+        next_header = re.search(
+            r"(?im)^\s*(?:\*+\s*)?(?:[A-Z]{3},\s*\d{1,2}[A-Z]+|SEATS|FARE RULES)\b",
+            text[passenger_header.end() :],
+        )
         section_end = (
             passenger_header.end() + next_header.start() if next_header else len(text)
         )
@@ -345,8 +445,8 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
     }
     day_headers = list(
         re.finditer(
-            r"(?im)^\s*\*\*\s*[A-Z]{3},\s*(\d{1,2})([A-Z]+)"
-            r"\*+\s*DEPART\*+\s*ARRIVE\*+\s*$",
+            r"(?im)^\s*(?:\*+\s*)?[A-Z]{3},\s*(\d{1,2})([A-Z]+)"
+            r"(?:\*+|\t|\s)+DEPART(?:\*+|\t|\s)+ARRIVE(?:\*+)?\s*$",
             text,
         )
     )

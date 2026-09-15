@@ -10,6 +10,7 @@ from clawflight.parse import (
     AIRLINE_EMAIL_CITY_TO_IATA,
     AIRLINE_NAME_TO_IATA,
     KNOWN_CARRIERS,
+    _strip_html,
     parse_airline_email,
 )
 from clawflight.airports import default_airports
@@ -18,6 +19,66 @@ from clawflight.registry import Registry
 
 def _parse(fixtures, name, year=2026):
     return parse_airline_email((fixtures / name).read_text(encoding="utf-8"), year)
+
+
+HTML_FIXTURE_PAIRS = [
+    "email_aa_trip_confirmation",
+    "email_air_france_generic",
+    "email_alaska_generic",
+    "email_british_airways_generic",
+    "email_delta_receipt",
+    "email_delta_schedule_change",
+    "email_emirates_generic",
+    "email_frontier_generic",
+    "email_hub_city_routes",
+    "email_jetblue_generic",
+    "email_lufthansa_generic",
+    "email_southwest_generic",
+    "email_spirit_generic",
+    "email_united_generic",
+]
+
+
+@pytest.mark.parametrize("stem", HTML_FIXTURE_PAIRS)
+def test_plain_and_html_carrier_fixtures_produce_identical_legs(fixtures, stem) -> None:
+    plain = (fixtures / (stem + ".txt")).read_text(encoding="utf-8")
+    html = (fixtures / (stem + ".html")).read_text(encoding="utf-8")
+
+    plain_flights = parse_airline_email(plain, 2026)
+    html_flights = parse_airline_email(_strip_html(html), 2026)
+
+    assert plain_flights
+    assert [flight.leg for flight in html_flights] == [flight.leg for flight in plain_flights]
+
+
+def test_delta_html_table_matches_plain_receipt_in_all_tracking_fields(fixtures) -> None:
+    plain = _parse(fixtures, "email_delta_receipt.txt")
+    html = (fixtures / "email_delta_receipt.html").read_text(encoding="utf-8")
+    rendered = parse_airline_email(_strip_html(html), 2026)
+
+    fields = lambda flight: (
+        flight.leg.carrier, flight.leg.number, flight.leg.origin, flight.leg.dest,
+        flight.leg.sched_dep_iso, flight.leg.conf_code,
+    )
+    assert [fields(flight) for flight in rendered] == [fields(flight) for flight in plain]
+
+
+def test_html_table_cells_and_nested_blocks_keep_one_row_and_a_separator() -> None:
+    rendered = _strip_html(
+        "<table><tr><td><div>ATLANTA</div></td>"
+        "<td><div>7:25 AM</div></td></tr></table>"
+    )
+
+    assert rendered == "ATLANTA\t7:25 AM"
+
+
+def test_html_table_cells_with_omitted_end_tags_keep_cell_and_row_boundaries() -> None:
+    rendered = _strip_html(
+        "<table><tr><td>ATLANTA<td>7:25 AM"
+        "<tr><td>NEW YORK JFK<td>9:31 AM</table>"
+    )
+
+    assert rendered == "ATLANTA\t7:25 AM\nNEW YORK JFK\t9:31 AM"
 
 
 @pytest.mark.parametrize(

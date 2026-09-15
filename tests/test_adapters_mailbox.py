@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import email.utils
+from email.message import EmailMessage
+from email.mime.text import MIMEText
 from datetime import datetime, timezone
 
 import pytest
@@ -10,6 +12,7 @@ from clawflight.adapters.mailbox import (
     MailboxAdapter,
     MailboxMessage,
     extract_text_body,
+    message_from_email,
     message_from_bytes,
     messages_to_candidates,
     messages_to_cancellations,
@@ -17,9 +20,18 @@ from clawflight.adapters.mailbox import (
 )
 from clawflight.adapters.mailbox_imap import ImapAdapter, ImapConfigError
 from clawflight.adapters.mailbox_mbox import MboxAdapter
+from clawflight.parse import parse_airline_email
 
 
 TRUSTED = {"air.example"}
+LABELLED_HTML_FIXTURE_PAIRS = [
+    "email_labelled_hash_compact",
+    "email_labelled_bare_compact",
+    "email_labelled_hash_hyphen",
+    "email_labelled_bare_hyphen",
+    "email_labelled_bare_space",
+    "email_labelled_hash_space",
+]
 
 
 def _message(**overrides) -> MailboxMessage:
@@ -119,6 +131,119 @@ def test_a_multipart_message_prefers_its_plain_text_part() -> None:
     outer.add_alternative("<p>html part</p>", subtype="html")
 
     assert "plain part" in extract_text_body(outer)
+
+
+def test_multipart_receipt_prefers_plain_and_does_not_duplicate_legs(fixtures) -> None:
+    plain = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    html = (fixtures / "email_delta_receipt.html").read_text(encoding="utf-8")
+    outer = EmailMessage()
+    outer["From"] = "Air <confirmations@air.example>"
+    outer.set_content(plain)
+    outer.add_alternative(html, subtype="html")
+
+    message = message_from_email(outer, "both-parts")
+    assert message is not None
+    flights = messages_to_parsed_flights([message], TRUSTED, 2026)
+
+    assert [(flight.leg.carrier, flight.leg.number) for flight in flights] == [
+        ("DL", 667), ("DL", 1226),
+    ]
+    assert message.body == plain
+
+
+def test_html_only_multipart_receipt_matches_plain_receipt(fixtures) -> None:
+    plain = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    html = (fixtures / "email_delta_receipt.html").read_text(encoding="utf-8")
+    outer = EmailMessage()
+    outer["From"] = "Air <confirmations@air.example>"
+    outer.make_alternative()
+    outer.attach(MIMEText(html, "html", "utf-8"))
+
+    message = message_from_email(outer, "html-only")
+    assert message is not None
+    rendered = messages_to_parsed_flights([message], TRUSTED, 2026)
+    expected = parse_airline_email(plain, 2026)
+
+    assert [flight.leg for flight in rendered] == [flight.leg for flight in expected]
+
+
+@pytest.mark.parametrize("stem", LABELLED_HTML_FIXTURE_PAIRS)
+def test_plain_and_html_labelled_fixtures_produce_identical_candidates(
+    fixtures, stem
+) -> None:
+    messages = []
+    for subtype in ("plain", "html"):
+        outer = EmailMessage()
+        outer["From"] = "Air <confirmations@air.example>"
+        outer["Date"] = "Sat, 11 Jul 2026 09:14:02 +0000"
+        outer.set_content(
+            (fixtures / (stem + "." + ("txt" if subtype == "plain" else "html"))).read_text(
+                encoding="utf-8"
+            ),
+            subtype=subtype,
+        )
+        message = message_from_email(outer, stem + "-" + subtype)
+        assert message is not None
+        messages.append(message)
+
+    plain, _ = messages_to_candidates([messages[0]], TRUSTED)
+    rendered, _ = messages_to_candidates([messages[1]], TRUSTED)
+    fields = lambda candidate: (
+        candidate.carrier,
+        candidate.number,
+        candidate.service_date,
+        candidate.origin,
+        candidate.destination,
+        candidate.confirmation_code,
+        candidate.traveler,
+        candidate.sched_dep_iso,
+        candidate.sched_arr_iso,
+    )
+
+    assert plain
+    assert [fields(candidate) for candidate in rendered] == [
+        fields(candidate) for candidate in plain
+    ]
+
+
+def test_real_mime_path_preserves_nested_table_cell_boundaries() -> None:
+    outer = EmailMessage()
+    outer["From"] = "Air <confirmations@air.example>"
+    outer.set_content(
+        "<table><tr><td><div>ATLANTA</div></td>"
+        "<td><div>7:25 AM</div></td></tr></table>",
+        subtype="html",
+    )
+
+    assert extract_text_body(outer) == "ATLANTA\t7:25 AM"
+    message = message_from_email(outer, "table-row")
+    assert message is not None and message.body == "ATLANTA\t7:25 AM"
+
+
+def test_real_mime_path_preserves_boundaries_when_end_tags_are_omitted() -> None:
+    outer = EmailMessage()
+    outer["From"] = "Air <confirmations@air.example>"
+    outer.set_content(
+        "<table><tr><td>ATLANTA<td>7:25 AM"
+        "<tr><td>NEW YORK JFK<td>9:31 AM</table>",
+        subtype="html",
+    )
+
+    expected = "ATLANTA\t7:25 AM\nNEW YORK JFK\t9:31 AM"
+    assert extract_text_body(outer) == expected
+    message = message_from_email(outer, "optional-end-tags")
+    assert message is not None and message.body == expected
+
+
+def test_oversized_html_is_capped_before_structural_normalization() -> None:
+    outer = EmailMessage()
+    outer["From"] = "Air <confirmations@air.example>"
+    outer.set_content("<div>" + ("x" * (300 * 1024)) + "TAIL-MARKER</div>", subtype="html")
+
+    body = extract_text_body(outer)
+
+    assert len(body) <= 256 * 1024
+    assert "TAIL-MARKER" not in body
 
 
 def test_bodies_are_bounded_before_ingestion() -> None:

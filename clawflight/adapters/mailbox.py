@@ -28,6 +28,7 @@ from ..email_ingest import (
 )
 from ..parse import (
     ParsedFlight,
+    _strip_html,
     parse_airline_email,
     parse_cancellation,
     parse_cancellations,
@@ -213,14 +214,14 @@ def extract_text_body(parsed: Message) -> str:
     if parsed.is_multipart():
         for part in parsed.walk():
             if part.get_content_type() == "text/plain":
-                return _decoded(part)
+                return _decoded(part)[:MAX_BODY_CHARS]
         for part in parsed.walk():
             if part.get_content_type() == "text/html":
-                return _strip_html(_decoded(part))
+                return _strip_html(_decoded(part)[:MAX_BODY_CHARS])
         return ""
     if parsed.get_content_type() == "text/html":
-        return _strip_html(_decoded(parsed))
-    return _decoded(parsed)
+        return _strip_html(_decoded(parsed)[:MAX_BODY_CHARS])
+    return _decoded(parsed)[:MAX_BODY_CHARS]
 
 
 def _decoded(part: Message) -> str:
@@ -233,26 +234,6 @@ def _decoded(part: Message) -> str:
         return payload.decode(charset, errors="replace")
     except LookupError:
         return payload.decode("utf-8", errors="replace")
-
-
-_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"[ \t]+")
-
-
-def _strip_html(html: str) -> str:
-    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", html)
-    text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</tr>", "\n", text)
-    text = _TAG_RE.sub(" ", text)
-    text = (
-        text.replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&#39;", "'")
-        .replace("&quot;", '"')
-    )
-    lines = [_WS_RE.sub(" ", line).strip() for line in text.splitlines()]
-    return "\n".join(line for line in lines if line)
 
 
 def _clean_message_id(value: Optional[str]) -> Optional[str]:

@@ -115,3 +115,12 @@ When one booking names several configured people, the registry retains one recor
 person. Existing records reconcile by person key rather than passenger order; added
 travelers use a person-key suffix. Attribution survives persistence and each traveler
 can receive the right flight updates.
+
+## I14 — Airline HTML is normalized once, with table structure intact
+
+MIME ingestion prefers `text/plain` in `multipart/alternative` and uses HTML only
+when no plain part exists. The shared standard-library HTML normalizer keeps each
+table row on one line, separates adjacent cells with tabs, and turns blocks nested
+inside a cell into spaces. It preserves those boundaries when valid HTML omits cell
+or row end tags. Receipt parsing keys on headings and columns common to plain text
+and normalized HTML; decorative `**` markers are optional.
