@@ -1,9 +1,11 @@
 """Airline email layout parsing against the synthetic fixtures."""
 import time
+from datetime import datetime
 
 import pytest
 
-from clawflight.models import polling_callsign
+from clawflight.models import FlightRecord, Observation, PersonRef, polling_callsign
+from clawflight.monitor import Monitor
 from clawflight.parse import (
     AIRLINE_EMAIL_CITY_TO_IATA,
     AIRLINE_NAME_TO_IATA,
@@ -42,6 +44,106 @@ def test_generic_email_parses_known_airline(
         carrier, number, date
     )
     assert (flights[0].leg.origin, flights[0].leg.dest) == route
+
+
+def test_jetblue_generic_fixture_has_the_exact_departure_timestamp(fixtures) -> None:
+    flight = _parse(fixtures, "email_jetblue_generic.txt")[0]
+
+    assert flight.leg.sched_dep_iso == "2026-10-03T08:40:00-04:00"
+    assert flight.leg.sched_arr_iso == "2026-10-03T11:55:00-07:00"
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_departure"),
+    [
+        ("email_united_generic.txt", "2026-09-18T08:40:00-04:00"),
+        ("email_jetblue_generic.txt", "2026-10-03T08:40:00-04:00"),
+        ("email_southwest_generic.txt", "2026-11-07T08:40:00-07:00"),
+        ("email_alaska_generic.txt", "2026-11-12T08:40:00-08:00"),
+        ("email_spirit_generic.txt", "2026-11-19T08:40:00-05:00"),
+        ("email_frontier_generic.txt", "2026-12-02T08:40:00-07:00"),
+        ("email_british_airways_generic.txt", "2026-12-08T08:40:00-05:00"),
+        ("email_air_france_generic.txt", "2026-12-14T08:40:00-05:00"),
+        ("email_lufthansa_generic.txt", "2026-12-19T08:40:00-05:00"),
+        ("email_emirates_generic.txt", "2026-12-27T08:40:00-05:00"),
+    ],
+)
+def test_every_timed_generic_fixture_carries_its_departure_clock(
+    fixtures, fixture_name, expected_departure
+) -> None:
+    flight = _parse(fixtures, fixture_name)[0]
+
+    assert flight.leg.sched_dep_iso == expected_departure
+
+
+def test_generic_email_enters_watch_at_two_hours_before_departure(fixtures, tmp_path) -> None:
+    parsed = _parse(fixtures, "email_jetblue_generic.txt")[0]
+    record = FlightRecord(
+        flight_id="B6611-2026-10-03",
+        leg=parsed.leg,
+        person=PersonRef("unknown", "Unknown"),
+        sources=("mail:synthetic-generic",),
+        backup_group=None,
+        status="scheduled",
+        notes=(),
+    )
+    departure = datetime.fromisoformat(parsed.leg.sched_dep_iso).timestamp()
+    now = departure - 2 * 60 * 60
+    monitor = Monitor(str(tmp_path / "monitor.json"))
+
+    events = monitor.assess(
+        record,
+        Observation(record.flight_id, None, None, None, now),
+        default_airports(),
+        now,
+    )
+
+    assert [event.kind for event in events] == ["tracking_started"]
+    assert monitor.state_snapshot()[record.flight_id]["phase"] == "watch"
+
+
+def test_generic_email_collects_its_named_passenger(fixtures) -> None:
+    flight = _parse(fixtures, "email_jetblue_generic.txt")[0]
+
+    assert flight.hints["passenger_name"] == "Juniper Wren"
+    assert flight.hints["passenger_names"] == ["Juniper Wren"]
+
+
+def test_generic_email_collects_every_passenger_on_the_record() -> None:
+    text = "\n".join([
+        "Passenger: Harriet Q Voss",
+        "Passenger: Tobias Voss",
+        "Confirmation: FAKEG2",
+        "Travel Date: 2026-10-03",
+        "Flight: JetBlue 611",
+        "Route: BOS -> LAX",
+        "Departs: 8:40 AM",
+        "Arrives: 11:55 AM",
+    ])
+
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert flight.hints["passenger_name"] == "Harriet Q Voss"
+    assert flight.hints["passenger_names"] == ["Harriet Q Voss", "Tobias Voss"]
+
+
+def test_generic_clock_with_unresolved_origin_stays_untimed_and_is_reported(caplog) -> None:
+    text = "\n".join([
+        "Passenger: Tobias Voss",
+        "Confirmation: FAKEG3",
+        "Travel Date: 2026-10-03",
+        "Flight: JetBlue 611",
+        "Route: ZZZ -> LAX",
+        "Departs: 8:40 AM",
+    ])
+    caplog.set_level("WARNING", logger="clawflight.parse")
+
+    flight = parse_airline_email(text, 2026)[0]
+
+    assert flight.leg.origin is None
+    assert flight.leg.sched_dep_iso is None
+    assert flight.hints["unresolved_airports"] == ["ZZZ"]
+    assert "ZZZ" in caplog.text
 
 
 def test_delta_receipt_layout_resolves_a_united_carrier(fixtures) -> None:
@@ -337,6 +439,38 @@ def test_trip_confirmation_parses_each_leg_with_seat_and_greeting(fixtures) -> N
     assert flights[0].leg.sched_arr_iso == "2026-02-27T10:20:00-05:00"
 
 
+@pytest.mark.parametrize(
+    ("month_token", "expected_dates"),
+    [
+        ("Jun", ["2026-06-11", "2026-06-14"]),
+        ("June", ["2026-06-11", "2026-06-14"]),
+    ],
+)
+def test_receipt_accepts_abbreviated_and_full_month_names(
+    fixtures, month_token, expected_dates
+) -> None:
+    text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    text = text.replace("MAY", month_token)
+
+    flights = parse_airline_email(text, 2026)
+
+    assert [flight.leg.date for flight in flights] == expected_dates
+    assert flights[0].leg.sched_dep_iso == "2026-06-11T06:00:00-04:00"
+
+
+@pytest.mark.parametrize("month_token", ["Feb", "February"])
+def test_trip_confirmation_accepts_abbreviated_and_full_month_names(
+    fixtures, month_token
+) -> None:
+    text = (fixtures / "email_aa_trip_confirmation.txt").read_text(encoding="utf-8")
+    text = text.replace("February", month_token)
+
+    flights = parse_airline_email(text, 2026)
+
+    assert [flight.leg.date for flight in flights] == ["2026-02-27", "2026-02-28"]
+    assert flights[0].leg.sched_dep_iso == "2026-02-27T07:45:00-05:00"
+
+
 @pytest.mark.parametrize("departure_time", ["7:45 XM", ""])
 def test_trip_confirmation_keeps_leg_when_departure_time_is_bad_or_missing(
     fixtures, departure_time
@@ -368,6 +502,27 @@ def test_schedule_change_uses_only_the_new_itinerary(fixtures) -> None:
     assert "your flight changed" in flights[0].hints["notes_excerpt"].lower()
     assert flights[0].leg.sched_dep_iso == "2026-05-21T06:00:00-04:00"
     assert flights[0].leg.sched_arr_iso == "2026-05-21T09:35:00-07:00"
+
+
+@pytest.mark.parametrize(
+    ("month_token", "expected_date"),
+    [
+        ("May", "2026-05-21"),
+        ("Jun", "2026-06-21"),
+        ("June", "2026-06-21"),
+        ("Nov", "2026-11-21"),
+    ],
+)
+def test_schedule_change_accepts_abbreviated_and_full_month_names(
+    fixtures, month_token, expected_date
+) -> None:
+    text = (fixtures / "email_delta_schedule_change.txt").read_text(encoding="utf-8")
+    text = text.replace("May", month_token)
+
+    flights = parse_airline_email(text, 2026)
+
+    assert len(flights) == 1
+    assert flights[0].leg.date == expected_date
 
 
 @pytest.mark.parametrize("departure_time", ["6:00 XM", ""])

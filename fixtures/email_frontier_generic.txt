@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-F9-0001
 Travel Date: 2026-12-02
 Flight: Frontier Airlines 418
 Route: DEN -> LAX
+Departs: 8:40 AM
+Arrives: 11:55 AM

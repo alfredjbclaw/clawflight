@@ -33,6 +33,18 @@ def test_multileg_itinerary_becomes_one_flight_per_leg(calendar_text) -> None:
     assert itinerary[1].leg.sched_arr_iso == "2026-07-11T22:30:00-04:00"
 
 
+def test_calendar_fixture_accepts_full_month_names(calendar_text) -> None:
+    full_month_calendar = calendar_text.replace(", Jul ", ", July ")
+
+    parsed = parse_calendar_events(full_month_calendar, default_year=2026)
+    itinerary = [
+        flight for flight in parsed if flight.hints["source_id"] == "cal-0001"
+    ]
+
+    assert [flight.leg.date for flight in itinerary] == ["2026-07-11", "2026-07-11"]
+    assert itinerary[0].leg.sched_dep_iso == "2026-07-11T12:51:00-06:00"
+
+
 def test_named_airline_and_passenger_resolve_from_an_award_receipt(calendar_text) -> None:
     # Given: the award-receipt block, whose carrier is named rather than coded.
     parsed = parse_calendar_events(calendar_text, default_year=2026)

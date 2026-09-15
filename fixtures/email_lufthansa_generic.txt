@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-LH-0001
 Travel Date: 2026-12-19
 Flight: Lufthansa 401
 Route: JFK -> FRA
+Departs: 8:40 AM
+Arrives: 11:55 AM

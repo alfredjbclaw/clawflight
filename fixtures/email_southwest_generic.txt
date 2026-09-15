@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-WN-0001
 Travel Date: 2026-11-07
 Flight: Southwest Airlines 925
 Route: DEN -> LGA
+Departs: 8:40 AM
+Arrives: 11:55 AM

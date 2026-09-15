@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-EK-0001
 Travel Date: 2026-12-27
 Flight: Emirates 202
 Route: JFK -> DXB
+Departs: 8:40 AM
+Arrives: 11:55 AM

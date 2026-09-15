@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-NK-0001
 Travel Date: 2026-11-19
 Flight: Spirit Airlines 707
 Route: LGA -> ORD
+Departs: 8:40 AM
+Arrives: 11:55 AM

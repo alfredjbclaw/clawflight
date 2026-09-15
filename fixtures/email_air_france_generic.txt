@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-AF-0001
 Travel Date: 2026-12-14
 Flight: Air France 9
 Route: JFK -> CDG
+Departs: 8:40 AM
+Arrives: 11:55 AM

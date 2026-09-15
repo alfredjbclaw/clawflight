@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-AS-0001
 Travel Date: 2026-11-12
 Flight: Alaska Airlines 332
 Route: SEA -> SFO
+Departs: 8:40 AM
+Arrives: 11:55 AM

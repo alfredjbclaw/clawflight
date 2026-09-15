@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-BA-0001
 Travel Date: 2026-12-08
 Flight: British Airways 178
 Route: JFK -> LHR
+Departs: 8:40 AM
+Arrives: 11:55 AM

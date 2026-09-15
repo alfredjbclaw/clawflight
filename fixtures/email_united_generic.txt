@@ -9,3 +9,5 @@ Ticket Number: FAKE-TICKET-UA-0001
 Travel Date: 2026-09-18
 Flight: United Airlines 184
 Route: JFK -> SFO
+Departs: 8:40 AM
+Arrives: 11:55 AM

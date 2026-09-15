@@ -228,7 +228,7 @@ def airport_timezone(iata: Optional[str]) -> "Optional[str]":
     return AIRPORT_TIMEZONES.get((iata or "").strip().upper()) or None
 
 
-DAY_RE = re.compile(r"^── .*?, (?P<month>[A-Za-z]{3}) (?P<day>\d{1,2}), (?P<year>\d{4})")
+DAY_RE = re.compile(r"^── .*?, (?P<month>[A-Za-z]+) (?P<day>\d{1,2}), (?P<year>\d{4})")
 FIELD_RE = re.compile(r"^  (?P<key>[A-Za-z]+):\s*(?P<value>.*)$")
 TITLE_RE = re.compile(r"^  (?P<title>\S.*)$")
 TIME_RE = re.compile(r"\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b", re.IGNORECASE)
@@ -247,6 +247,17 @@ class ParsedFlight:
 # --------------------------------------------------------------------------
 # Airline email
 # --------------------------------------------------------------------------
+
+
+def _month_date(month: str, day: str, year: int) -> "Optional[str]":
+    """Parse an abbreviated or full English month name without guessing a year."""
+    value = "{} {} {}".format(month, day, year)
+    for format_string in ("%b %d %Y", "%B %d %Y"):
+        try:
+            return datetime.strptime(value, format_string).date().isoformat()
+        except (OverflowError, ValueError):
+            continue
+    return None
 
 
 def parse_airline_email(text: str, default_year: int) -> "list[ParsedFlight]":
@@ -318,7 +329,7 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
     }
     day_headers = list(
         re.finditer(
-            r"(?im)^\s*\*\*\s*[A-Z]{3},\s*(\d{1,2})([A-Z]{3})"
+            r"(?im)^\s*\*\*\s*[A-Z]{3},\s*(\d{1,2})([A-Z]+)"
             r"\*+\s*DEPART\*+\s*ARRIVE\*+\s*$",
             text,
         )
@@ -326,12 +337,10 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
     parsed = []
     seen = set()
     for index, header in enumerate(day_headers):
-        try:
-            date = datetime.strptime(
-                "{} {} {}".format(header.group(2), header.group(1), default_year),
-                "%b %d %Y",
-            ).date().isoformat()
-        except (OverflowError, ValueError):
+        date = _month_date(
+            header.group(2), header.group(1), default_year
+        )
+        if date is None:
             continue
         end = day_headers[index + 1].start() if index + 1 < len(day_headers) else len(text)
         section = text[header.end() : end]
@@ -429,14 +438,10 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
             continue
         dep_time = _clock_in(prefix[airports[0].end() : airports[1].start()])
         arr_time = _clock_in(prefix[airports[1].end() :])
-        try:
-            date = datetime.strptime(
-                "{} {} {}".format(
-                    date_match.group(1), date_match.group(2), date_match.group(3)
-                ),
-                "%B %d %Y",
-            ).date().isoformat()
-        except ValueError:
+        date = _month_date(
+            date_match.group(1), date_match.group(2), int(date_match.group(3))
+        )
+        if date is None:
             continue
         seat_match = re.search(
             r"(?im)^\s*Seats?:\s*(\d{1,2}[A-F])\s*$",
@@ -489,12 +494,8 @@ def _parse_schedule_change_email(text: str, default_year: int) -> "list[ParsedFl
         return []
     dep_time = _clock_in(route_text[cities[0].end() : cities[1].start()])
     arr_time = _clock_in(route_text[cities[1].end() :])
-    try:
-        date = datetime.strptime(
-            "{} {} {}".format(heading.group("month"), heading.group("day"), default_year),
-            "%B %d %Y",
-        ).date().isoformat()
-    except (OverflowError, ValueError):
+    date = _month_date(heading.group("month"), heading.group("day"), default_year)
+    if date is None:
         return []
     carrier = _resolve_carrier(heading.group("carrier"))
     if carrier is None:
@@ -523,6 +524,7 @@ def _parse_generic_email(text: str, default_year: int) -> "list[ParsedFlight]":
     parsed = []
     seen = set()
     confirmation = _generic_confirmation(text)
+    passengers = _generic_passengers(lines, 0, len(lines))
     for position, (index, (carrier, number)) in enumerate(flights):
         lower = max(0, flights[position - 1][0] + 1 if position else index - 12)
         blank_lines = [
@@ -564,6 +566,11 @@ def _parse_generic_email(text: str, default_year: int) -> "list[ParsedFlight]":
             continue
         block = "\n".join(lines[index:upper])
         operating_carrier, operating_number = _operating_identity(block)
+        dep_time, arr_time = _generic_times(lines, lower, upper)
+        hints = {}
+        if passengers:
+            hints["passenger_name"] = passengers[0]
+            hints["passenger_names"] = passengers
         parsed.append(
             _airline_parsed_flight(
                 carrier,
@@ -571,17 +578,66 @@ def _parse_generic_email(text: str, default_year: int) -> "list[ParsedFlight]":
                 date,
                 route[0],
                 route[1],
-                None,
-                None,
+                dep_time,
+                arr_time,
                 confirmation,
                 None,
-                {},
+                hints,
                 operating_carrier,
                 operating_number,
             )
         )
         seen.add(key)
     return parsed
+
+
+def _generic_times(lines, lower: int, upper: int):
+    """Return explicitly labelled clocks from one generic itinerary block."""
+    departure = None
+    arrival = None
+    for line in lines[lower:upper]:
+        if len(line) > 200:
+            continue
+        match = re.fullmatch(
+            r"\s*(?:Scheduled\s+)?"
+            r"(?P<label>Depart(?:s|ure)?|Departure\s+time|"
+            r"Arriv(?:e|es|al)|Arrival\s+time)\s*:\s*(?P<value>.{1,80})\s*",
+            line,
+            re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        clock = _clock_in(match.group("value"))
+        label = match.group("label").casefold()
+        if label.startswith("depart") and departure is None:
+            departure = clock
+        elif label.startswith("arriv") and arrival is None:
+            arrival = clock
+    return departure, arrival
+
+
+def _generic_passengers(lines, lower: int, upper: int) -> "list[str]":
+    """Collect every explicitly labelled passenger in one generic block."""
+    passengers = []
+    for line in lines[lower:upper]:
+        if len(line) > 600:
+            continue
+        match = re.fullmatch(
+            r"\s*(?P<label>Passengers?|Travell?ers?)(?:\s+\d+)?\s*:\s*"
+            r"(?P<value>.{1,512})\s*",
+            line,
+            re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        values = [match.group("value")]
+        if match.group("label").casefold().endswith("s"):
+            values = re.split(r"\s*(?:;|\s+and\s+|&)\s*", match.group("value"))
+        for value in values:
+            normalized = re.sub(r"\s+", " ", value).strip()
+            if normalized and normalized not in passengers:
+                passengers.append(normalized)
+    return passengers
 
 
 def _generic_flight_identity(line: str) -> "Optional[tuple[str, int]]":
@@ -940,10 +996,13 @@ def _event_blocks(text: str, default_year: int):
         day = DAY_RE.match(line)
         if day:
             yield from flush()
-            current_date = datetime.strptime(
-                "{} {} {}".format(day.group("month"), day.group("day"), day.group("year")),
-                "%b %d %Y",
-            ).date().isoformat()
+            parsed_date = _month_date(
+                day.group("month"), day.group("day"), int(day.group("year"))
+            )
+            if parsed_date is None:
+                title, fields, notes, reading_notes = None, {}, [], False
+                continue
+            current_date = parsed_date
             title, fields, notes, reading_notes = None, {}, [], False
             continue
         field = FIELD_RE.match(line)
