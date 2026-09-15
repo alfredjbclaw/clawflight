@@ -1,0 +1,7 @@
+Your itinerary is ready
+Confirmation Code: FAKE31
+Traveler: HARRIET VOSS
+Flight #: DL767
+Date: 2026-11-09
+From: ATL
+To: JFK

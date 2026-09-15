@@ -99,6 +99,15 @@ class PersonTable:
         for person in self.people:
             if any(substring in lowered for substring in person.match_substrings):
                 return person.ref
+        value_forms = _normalized_name_forms(value)
+        for person in self.people:
+            configured_forms = {
+                form
+                for substring in person.match_substrings
+                for form in _normalized_name_forms(substring)
+            }
+            if value_forms & configured_forms:
+                return person.ref
         return None
 
     def from_title(self, title: str) -> Optional[PersonRef]:
@@ -192,6 +201,32 @@ def _possessive_names(person: Person) -> Tuple[str, ...]:
     names.extend(person.possessive_aliases)
     names.append(person.display.casefold())
     return tuple(dict.fromkeys(name for name in names if name))
+
+
+_HONORIFICS = frozenset({"mr", "mrs", "ms", "miss", "dr"})
+
+
+def _normalized_name_forms(value: str) -> "set[str]":
+    """Return exact deterministic forms for conventional passenger-name layouts."""
+    if not isinstance(value, str):
+        return set()
+
+    def cleaned(part: str) -> "list[str]":
+        words = re.findall(r"[a-z]+", part.casefold())
+        if words and words[0] in _HONORIFICS:
+            words = words[1:]
+        return [word for word in words if len(word) > 1]
+
+    forms = set()
+    direct = cleaned(value)
+    if direct:
+        forms.add(" ".join(direct))
+    if "/" in value:
+        surname, given = value.split("/", 1)
+        reversed_words = cleaned(given) + cleaned(surname)
+        if reversed_words:
+            forms.add(" ".join(reversed_words))
+    return forms
 
 
 def _person_from_entry(entry: object) -> Optional[Person]:

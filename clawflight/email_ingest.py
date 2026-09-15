@@ -8,13 +8,17 @@ digest, never a body excerpt.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parseaddr
 from typing import FrozenSet, Iterable, Optional, Tuple, Union
 
-from .parse import KNOWN_CARRIERS, _time_to_iso
+from .parse import KNOWN_CARRIERS, _airline_email_city, _time_to_iso
+
+
+logger = logging.getLogger(__name__)
 
 
 MAX_BODY_CHARS = 256 * 1024
@@ -24,8 +28,9 @@ MAX_EMAIL_CHARS = 254
 
 _ADDRESS_RE = re.compile(r"^[^\s@<>]+@([^\s@<>]+)$")
 _FLIGHT_RE = re.compile(
-    r"(?im)^\s*(?:flight|flight\s+number)\s*:\s*"
-    r"(?P<carrier>[A-Z0-9]{2})\s*-?\s*(?P<number>\d{1,4})\s*$"
+    r"(?im)^[ \t]*(?:flight(?:[ \t]+(?:number|#))?[ \t]*:[ \t]*)?"
+    r"(?P<carrier>[A-Z0-9]{2})(?:[ \t]*-[ \t]*|[ \t]+)?"
+    r"(?P<number>[0-9]{1,4})[ \t]*\r?$"
 )
 _FIELD_PATTERNS = {
     "date": re.compile(
@@ -191,6 +196,38 @@ class EmailItineraryCandidate:
     sched_arr_iso: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class SkippedEmailLeg:
+    """Bounded detail about a labelled leg that could not be ingested."""
+
+    carrier: str
+    number: int
+    reason: str
+
+
+class EmailIngestionResult(tuple):
+    """Candidate tuple plus non-sensitive reasons for legs skipped within it."""
+
+    skipped_legs: Tuple[SkippedEmailLeg, ...]
+
+    def __new__(
+        cls,
+        candidates: Iterable[EmailItineraryCandidate] = (),
+        skipped_legs: Iterable[SkippedEmailLeg] = (),
+    ) -> "EmailIngestionResult":
+        result = super().__new__(cls, candidates)
+        result.skipped_legs = tuple(skipped_legs)
+        return result
+
+    @property
+    def candidates(self) -> Tuple[EmailItineraryCandidate, ...]:
+        return tuple(self)
+
+    @property
+    def skipped_reasons(self) -> Tuple[str, ...]:
+        return tuple(leg.reason for leg in self.skipped_legs)
+
+
 def _one_field(text: str, field: str) -> Optional[str]:
     values = {match.group("value").strip() for match in _FIELD_PATTERNS[field].finditer(text)}
     return next(iter(values)) if len(values) == 1 else None
@@ -199,9 +236,32 @@ def _one_field(text: str, field: str) -> Optional[str]:
 def _service_date(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
-    for format_string in ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y"):
+    raw = value.strip()
+    slash = re.fullmatch(r"(?P<first>\d{1,2})/(?P<second>\d{1,2})/(?P<year>\d{4})", raw)
+    if slash:
+        first = int(slash.group("first"))
+        second = int(slash.group("second"))
+        if first <= 12 and second <= 12:
+            logger.warning("assuming US month-first date for ambiguous value %r", raw)
+            format_string = "%m/%d/%Y"
+        elif first > 12:
+            format_string = "%d/%m/%Y"
+        else:
+            format_string = "%m/%d/%Y"
         try:
-            return datetime.strptime(value.strip(), format_string).date().isoformat()
+            return datetime.strptime(raw, format_string).date().isoformat()
+        except ValueError:
+            return None
+    for format_string in (
+        "%Y-%m-%d",
+        "%B %d, %Y",
+        "%b %d, %Y",
+        "%d %b %Y",
+        "%d %B %Y",
+        "%Y/%m/%d",
+    ):
+        try:
+            return datetime.strptime(raw, format_string).date().isoformat()
         except ValueError:
             continue
     return None
@@ -210,8 +270,14 @@ def _service_date(value: Optional[str]) -> Optional[str]:
 def _airport(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
-    match = _AIRPORT_RE.search(value.strip())
-    return match.group("code").upper() if match else None
+    normalized = value.strip()
+    match = _AIRPORT_RE.search(normalized)
+    if match:
+        return match.group("code").upper()
+    resolved = _airline_email_city(normalized)
+    if resolved is None:
+        logger.warning("unresolved airport or city value %r", normalized[:128])
+    return resolved
 
 
 def _route(segment: str) -> Tuple[Optional[str], Optional[str]]:
@@ -274,7 +340,7 @@ def ingest_email(
     trusted_sources: Union[TrustedSenderPolicy, Iterable[str]],
     organizer: Optional[str] = None,
     source_kind: str = "email",
-) -> Tuple[EmailItineraryCandidate, ...]:
+) -> EmailIngestionResult:
     """Turn one trusted labelled confirmation message into bounded candidates.
 
     Invalid, untrusted, ambiguous, or incomplete messages return an empty
@@ -287,9 +353,9 @@ def ingest_email(
     )
     sender_identity = _address(sender)
     if sender_identity is None or not policy.trusts(sender):
-        return ()
+        return EmailIngestionResult()
     if not isinstance(body, str) or len(body) > MAX_BODY_CHARS:
-        return ()
+        return EmailIngestionResult()
     stable_source_id = _bounded_source_value(source_id, "source_id")
     stable_source_kind = _bounded_source_value(source_kind, "source_kind")
     if not isinstance(observed_at, datetime):
@@ -297,7 +363,7 @@ def ingest_email(
 
     flights = list(_FLIGHT_RE.finditer(body))
     if not flights or len(flights) > MAX_CANDIDATES:
-        return ()
+        return EmailIngestionResult()
 
     global_confirmation = _one_field(body, "confirmation")
     global_traveler = _one_field(body, "traveler")
@@ -310,10 +376,14 @@ def ingest_email(
         digest=_body_digest(body),
     )
     candidates = []
+    skipped_legs = []
     for index, flight in enumerate(flights):
         carrier = flight.group("carrier").upper()
         if carrier not in KNOWN_CARRIERS:
-            return ()
+            skipped_legs.append(
+                SkippedEmailLeg(carrier, int(flight.group("number")), "unknown carrier")
+            )
+            continue
         end = flights[index + 1].start() if index + 1 < len(flights) else len(body)
         segment = body[flight.start() : end]
         service_date = _service_date(_one_field(segment, "date"))
@@ -328,11 +398,28 @@ def ingest_email(
             or confirmation is None
             or _CONFIRMATION_RE.fullmatch(confirmation.upper()) is None
         ):
-            return ()
+            missing = []
+            if service_date is None:
+                missing.append("service date")
+            if origin is None or destination is None or origin == destination:
+                missing.append("route")
+            if confirmation is None or _CONFIRMATION_RE.fullmatch(confirmation.upper()) is None:
+                missing.append("confirmation code")
+            skipped_legs.append(
+                SkippedEmailLeg(
+                    carrier,
+                    int(flight.group("number")),
+                    "invalid {}".format(", ".join(missing)),
+                )
+            )
+            continue
         if traveler and len(traveler) > MAX_IDENTITY_CHARS:
-            return ()
-        candidates.append(
-            EmailItineraryCandidate(
+            skipped_legs.append(
+                SkippedEmailLeg(carrier, int(flight.group("number")), "invalid traveler")
+            )
+            continue
+        try:
+            candidate = EmailItineraryCandidate(
                 carrier=carrier,
                 number=int(flight.group("number")),
                 service_date=service_date,
@@ -349,8 +436,13 @@ def ingest_email(
                     service_date, _one_field(segment, "arrival_time"), destination
                 ),
             )
-        )
-    return tuple(candidates)
+        except (OverflowError, TypeError, ValueError):
+            skipped_legs.append(
+                SkippedEmailLeg(carrier, int(flight.group("number")), "malformed leg")
+            )
+            continue
+        candidates.append(candidate)
+    return EmailIngestionResult(candidates, skipped_legs)
 
 
 # Descriptive aliases keep the primitive pleasant for callers that do not care

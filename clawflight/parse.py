@@ -66,6 +66,7 @@ CITY_TO_IATA = {
 # arrival columns. Only mappings we can prove belong here: an unmapped city
 # yields a leg with a missing airport rather than a guess.
 AIRLINE_EMAIL_CITY_TO_IATA = {
+    "ATLANTA": "ATL",
     "NYC-KENNEDY": "JFK",
     "NYC-LAGUARDIA": "LGA",
     "KENNEDY INTL": "JFK",
@@ -192,14 +193,26 @@ def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
     )
     if confirmation is None:
         return []
-    passenger = re.search(
-        r"\*\*\s*Passenger Info\s*\*\*\s*Name:\s*([^\r\n]+)",
-        text,
-        re.IGNORECASE,
+    passenger_header = re.search(
+        r"(?im)^\s*\*\*\s*Passenger Info\s*\*\*\s*$", text
     )
+    passengers = []
+    if passenger_header:
+        next_header = re.search(r"(?m)^\s*\*\*", text[passenger_header.end() :])
+        section_end = (
+            passenger_header.end() + next_header.start() if next_header else len(text)
+        )
+        passenger_section = text[passenger_header.end() : section_end]
+        passengers = [
+            re.sub(r"\s+", " ", match.group(1)).strip()
+            for match in re.finditer(
+                r"(?im)^\s*Name:\s*([^\r\n]{1,512})\s*$", passenger_section
+            )
+        ]
     hints = {}
-    if passenger:
-        hints["passenger_name"] = re.sub(r"\s+", " ", passenger.group(1)).strip()
+    if passengers:
+        hints["passenger_name"] = passengers[0]
+        hints["passenger_names"] = passengers
 
     seats = {
         (_resolve_carrier(match.group("carrier")), int(match.group("number"))):
@@ -290,9 +303,9 @@ def _parse_trip_confirmation(text: str) -> "list[ParsedFlight]":
     if confirmation is None:
         return []
     greeting = re.search(
-        r"\[Hello\s+(?:Mr|Mrs|Ms|Miss|Dr)\.?\s+([^!\]\r\n]+)!?\]",
+        r"(?im)^\s*\[Hello\s+(?:(?:Mr|Mrs|Ms|Miss|Dr)\.?\s+)?"
+        r"([^!\]\r\n]{1,512})!?\]\s*$",
         text,
-        re.IGNORECASE,
     )
     hints = {}
     if greeting:

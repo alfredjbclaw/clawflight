@@ -132,3 +132,21 @@ def test_lookups_tolerate_non_string_evidence(people) -> None:
     assert people.from_title(17) is None
     assert people.from_attendee(["alex.kestrel@example.com"]) is None
     assert people.rank({"attendees": "alex.kestrel@example.com"}) == 0
+
+
+def test_booking_name_normalization_matches_exact_configured_people() -> None:
+    table = PersonTable.from_entries([
+        {"key": "harriet", "display": "Harriet", "match_substrings": ["harriet voss"]},
+        {"key": "tobias", "display": "Tobias", "match_substrings": ["tobias voss"]},
+    ])
+
+    assert table.from_text("VOSS/HARRIET Q") == PersonRef("harriet", "Harriet")
+    assert table.from_text("MR. TOBIAS VOSS") == PersonRef("tobias", "Tobias")
+
+
+def test_surname_first_normalization_does_not_manufacture_a_match() -> None:
+    table = PersonTable.from_entries([
+        {"key": "harriet", "display": "Harriet", "match_substrings": ["harriet voss"]},
+    ])
+
+    assert table.from_text("VOSS/GERALD P") is None

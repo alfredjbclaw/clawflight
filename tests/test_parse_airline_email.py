@@ -269,3 +269,25 @@ def test_a_damaged_date_does_not_stop_ingestion(fixtures) -> None:
 
     # Then: the parser returns nothing instead of raising into the sweep.
     assert parse_airline_email(text, 10**9) == []
+
+
+def test_receipt_captures_every_name_and_keeps_the_first_primary(fixtures) -> None:
+    text = (fixtures / "email_delta_receipt.txt").read_text(encoding="utf-8")
+    text = text.replace(
+        "Name: ROBIN J KESTREL",
+        "Name: HARRIET Q VOSS\nName: TOBIAS VOSS",
+    )
+
+    flights = parse_airline_email(text, 2026)
+
+    assert flights[0].hints["passenger_names"] == ["HARRIET Q VOSS", "TOBIAS VOSS"]
+    assert flights[0].hints["passenger_name"] == "HARRIET Q VOSS"
+
+
+def test_untitled_trip_greeting_yields_a_passenger_name(fixtures) -> None:
+    text = (fixtures / "email_aa_trip_confirmation.txt").read_text(encoding="utf-8")
+    text = text.replace("[Hello Mr. Sam Kestrel!]", "[Hello Tobias Voss!]")
+
+    flights = parse_airline_email(text, 2026)
+
+    assert flights[0].hints["passenger_name"] == "Tobias Voss"

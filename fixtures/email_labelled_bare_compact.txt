@@ -1,0 +1,6 @@
+Booking details
+Confirmation Code: FAKE32
+UA410
+Date: 2026-11-10
+From: EWR
+To: ORD

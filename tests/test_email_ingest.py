@@ -104,9 +104,21 @@ def test_untrusted_lookalike_and_incomplete_bodies_produce_nothing() -> None:
     assert _ingest(SINGLE_LEG.replace("To: LAX", "To: JFK")) == ()
 
 
-def test_an_unknown_carrier_rejects_the_whole_message() -> None:
-    # A designator we do not recognise means we misread the body; refuse all of it.
-    assert _ingest(SINGLE_LEG.replace("DL 248", "ZZ 248")) == ()
+def test_an_unknown_carrier_leg_does_not_discard_a_valid_leg() -> None:
+    body = SINGLE_LEG + """
+Flight: ZZ 249
+Date: 2026-08-20
+From: LAX
+To: JFK
+Confirmation Code: FAKE20
+"""
+
+    result = _ingest(body)
+
+    assert [(candidate.carrier, candidate.number) for candidate in result] == [("DL", 248)]
+    assert [(leg.carrier, leg.number, leg.reason) for leg in result.skipped_legs] == [
+        ("ZZ", 249, "unknown carrier")
+    ]
 
 
 def test_ambiguous_message_level_fields_are_refused() -> None:
@@ -196,3 +208,159 @@ def test_programmer_errors_in_provenance_raise() -> None:
             body=SINGLE_LEG,
             trusted_sources=TRUSTED,
         )
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected"),
+    [
+        ("email_labelled_hash_compact.txt", ("DL", 767, "ATL", "JFK")),
+        ("email_labelled_bare_compact.txt", ("UA", 410, "EWR", "ORD")),
+        ("email_labelled_hash_hyphen.txt", ("AA", 91, "JFK", "LAX")),
+        ("email_labelled_bare_hyphen.txt", ("B6", 611, "BOS", "LAX")),
+        ("email_labelled_bare_space.txt", ("AS", 332, "SEA", "SFO")),
+        ("email_labelled_hash_space.txt", ("WN", 925, "DEN", "LGA")),
+    ],
+)
+def test_realistic_labelled_shapes_produce_candidates(fixtures, fixture_name, expected) -> None:
+    (candidate,) = _ingest((fixtures / fixture_name).read_text(encoding="utf-8"))
+
+    assert (candidate.carrier, candidate.number, candidate.origin, candidate.destination) == expected
+
+
+def test_one_malformed_leg_does_not_discard_a_good_leg() -> None:
+    body = """Booking Reference: FAKE41
+Flight: DL 767
+Date: 2026-11-09
+From: ATL
+To: JFK
+
+Flight: DL 768
+Date: definitely not a date
+From: JFK
+To: ATL
+"""
+
+    result = _ingest(body)
+
+    assert [(candidate.carrier, candidate.number) for candidate in result] == [("DL", 767)]
+    assert [(leg.number, leg.reason) for leg in result.skipped_legs] == [
+        (768, "invalid service date")
+    ]
+
+
+def test_every_malformed_leg_still_produces_no_candidates_and_reports_each_leg() -> None:
+    body = """Booking Reference: FAKE42
+Flight: DL 767
+Date: bad one
+From: ATL
+To: JFK
+
+Flight: UA 410
+Date: bad two
+From: EWR
+To: ORD
+"""
+
+    result = _ingest(body)
+
+    assert result == ()
+    assert [(leg.carrier, leg.number, leg.reason) for leg in result.skipped_legs] == [
+        ("DL", 767, "invalid service date"),
+        ("UA", 410, "invalid service date"),
+    ]
+
+@pytest.mark.parametrize(
+    ("raw_date", "expected"),
+    [
+        ("2026-11-09", "2026-11-09"),
+        ("November 9, 2026", "2026-11-09"),
+        ("Nov 9, 2026", "2026-11-09"),
+        ("09 Nov 2026", "2026-11-09"),
+        ("9 November 2026", "2026-11-09"),
+        ("2026/11/09", "2026-11-09"),
+    ],
+)
+def test_supported_service_dates_survive_ingestion(raw_date, expected) -> None:
+    (candidate,) = _ingest(SINGLE_LEG.replace("2026-08-19", raw_date))
+
+    assert candidate.service_date == expected
+
+
+def test_ambiguous_slash_date_uses_us_month_first_and_warns(caplog) -> None:
+    with caplog.at_level("WARNING", logger="clawflight.email_ingest"):
+        (candidate,) = _ingest(SINGLE_LEG.replace("2026-08-19", "11/09/2026"))
+
+    assert candidate.service_date == "2026-11-09"
+    assert "US month-first" in caplog.text
+    assert "11/09/2026" in caplog.text
+
+
+def test_unambiguous_slash_date_uses_day_first_without_warning(caplog) -> None:
+    with caplog.at_level("WARNING", logger="clawflight.email_ingest"):
+        (candidate,) = _ingest(SINGLE_LEG.replace("2026-08-19", "25/12/2026"))
+
+    assert candidate.service_date == "2026-12-25"
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    ("origin", "expected"),
+    [("Atlanta", "ATL"), ("(ATL)", "ATL"), ("ATL", "ATL")],
+)
+def test_airport_shapes_resolve_through_ingestion(origin, expected) -> None:
+    (candidate,) = _ingest(SINGLE_LEG.replace("From: JFK", "From: {}".format(origin)))
+
+    assert candidate.origin == expected
+
+
+def test_unresolvable_airport_skips_the_leg_and_warns(caplog) -> None:
+    with caplog.at_level("WARNING", logger="clawflight.email_ingest"):
+        result = _ingest(SINGLE_LEG.replace("From: JFK", "From: Mystery Borough"))
+
+    assert result == ()
+    assert result.skipped_legs[0].reason == "invalid route"
+    assert "unresolved airport or city" in caplog.text
+    assert "Mystery Borough" in caplog.text
+
+
+def test_unknown_prose_designators_remain_gated() -> None:
+    for token in ("US 100", "RE 2024"):
+        body = "Confirmation Code: FAKE51\n{}\nDate: 2026-11-09\nFrom: ATL\nTo: JFK\n".format(token)
+        assert _ingest(body) == ()
+
+
+def test_adversarial_near_matches_are_bounded() -> None:
+    import time
+    from clawflight.email_ingest import MAX_BODY_CHARS
+
+    body = ("Flight Number ################################################ DL- almost 9999\n" * 6000)[
+        :MAX_BODY_CHARS
+    ]
+    assert len(body) == MAX_BODY_CHARS
+    started = time.monotonic()
+
+    assert _ingest(body) == ()
+    assert time.monotonic() - started < 2.0
+
+
+def test_max_size_multiline_whitespace_near_match_is_bounded() -> None:
+    import time
+    from clawflight.email_ingest import MAX_BODY_CHARS
+
+    body = " \n" * (MAX_BODY_CHARS // 2)
+    assert len(body) == MAX_BODY_CHARS
+    started = time.monotonic()
+
+    assert _ingest(body) == ()
+    assert time.monotonic() - started < 2.0
+
+
+def test_max_size_single_line_whitespace_near_match_is_bounded() -> None:
+    import time
+    from clawflight.email_ingest import MAX_BODY_CHARS
+
+    body = "DL" + " " * (MAX_BODY_CHARS - 2)
+    assert len(body) == MAX_BODY_CHARS
+    started = time.monotonic()
+
+    assert _ingest(body) == ()
+    assert time.monotonic() - started < 2.0

@@ -1,0 +1,6 @@
+Trip receipt
+Confirmation Code: FAKE33
+Flight #: AA-91
+Date: 2026-11-11
+From: JFK
+To: LAX

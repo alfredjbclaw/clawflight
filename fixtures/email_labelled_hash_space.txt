@@ -1,0 +1,6 @@
+Your booking
+Confirmation Code: FAKE36
+Flight #: WN 925
+Date: 2026-11-14
+From: DEN
+To: LGA

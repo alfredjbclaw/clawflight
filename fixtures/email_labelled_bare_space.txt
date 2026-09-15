@@ -1,0 +1,6 @@
+Flight details
+Confirmation Code: FAKE35
+AS 332
+Date: 2026-11-13
+From: SEA
+To: SFO
