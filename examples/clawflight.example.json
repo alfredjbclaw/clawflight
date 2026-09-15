@@ -74,6 +74,11 @@
   //   "mbox" reads a local mbox file or a folder of .eml files (offline)
   //   "none" disables ingestion; supply itineraries another way
   //
+  // Forwarded messages arrive From: this forwarding mailbox, not the airline.
+  // Trust the forwarding address below. It can relay anything it receives, so
+  // use an address you control. For direct airline delivery, set forwarding to
+  // false and trust airline domains instead.
+  //
   // trusted_senders is an allow-list of exact addresses and base domains. A
   // base domain matches itself and true subdomains only, so "delta.com" never
   // matches "delta.com.phish.example". Nothing outside it is ever parsed.
@@ -85,13 +90,9 @@
     "username": "family-flights@example.com",
     "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
     "folder": "INBOX",
+    "forwarding": true,
     "trusted_senders": [
-      "delta.com",
-      "aa.com",
-      "united.com",
-      "jetblue.com",
-      "alaskaair.com",
-      "southwest.com"
+      "family-flights@example.com"
     ],
     "poll_trusted_senders_only": true
   },

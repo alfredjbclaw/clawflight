@@ -43,7 +43,7 @@ class ConfigError(ValueError):
 class MailboxSettings:
     """How confirmation email reaches clawflight.
 
-    ``adapter`` is one of ``imap`` (poll a forwarding mailbox), ``mbox`` (read a
+    ``adapter`` is one of ``imap`` (poll an email mailbox), ``mbox`` (read a
     local file drop — the offline/CI path), or ``none``.
     """
 
@@ -56,6 +56,7 @@ class MailboxSettings:
     folder: str = "INBOX"
     path: str = ""
     trusted_senders: Tuple[str, ...] = ()
+    forwarding: bool = False
     poll_trusted_senders_only: bool = True
     max_messages: int = 50
 
@@ -149,6 +150,7 @@ class Config:
                 "folder": self.mailbox.folder,
                 "path": self.mailbox.path,
                 "trusted_senders": list(self.mailbox.trusted_senders),
+                "forwarding": self.mailbox.forwarding,
                 "poll_trusted_senders_only": self.mailbox.poll_trusted_senders_only,
             },
             "push": {
@@ -284,6 +286,7 @@ def _mailbox_from(value: object) -> MailboxSettings:
         folder=_text(value.get("folder"), defaults.folder),
         path=_text(value.get("path"), defaults.path),
         trusted_senders=_string_tuple(value.get("trusted_senders")),
+        forwarding=bool(value.get("forwarding", defaults.forwarding)),
         poll_trusted_senders_only=bool(
             value.get("poll_trusted_senders_only", defaults.poll_trusted_senders_only)
         ),
@@ -425,6 +428,20 @@ def validate(config: Config) -> List[Finding]:
             Finding(
                 "error",
                 "mailbox.trusted_senders is empty: no message would ever be ingested.",
+            )
+        )
+    if (
+        mailbox.enabled
+        and mailbox.forwarding
+        and mailbox.trusted_senders
+        and not any("@" in sender for sender in mailbox.trusted_senders)
+    ):
+        findings.append(
+            Finding(
+                "error",
+                "forwarding mailbox trusts only domains: forwarded messages arrive "
+                "from the forwarding address; add that exact address to "
+                "mailbox.trusted_senders.",
             )
         )
 

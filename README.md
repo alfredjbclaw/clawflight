@@ -12,6 +12,10 @@ works out whose flight it is, watches the flight with free public data feeds,
 and posts alerts to whatever chat your family already uses — takeoff, landing,
 delays, schedule changes, cancellations, tight connections.
 
+Forwarded mail arrives from the forwarding mailbox, so the headline workflow
+must trust that mailbox's address in `trusted_senders`; see the working
+[forwarding configuration](docs/setup.md#mailbox--where-confirmations-arrive).
+
 ```
 airline email ─▶ forwarding address / IMAP mailbox ─┐
 calendar export (optional adapter) ─────────────────┤
@@ -134,7 +138,8 @@ From a checkout, build the bundle yourself with `make skill-bundle`.
     "host": "imap.gmail.com",
     "username": "family-flights@example.com",
     "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
-    "trusted_senders": ["delta.com", "aa.com", "united.com"]
+    "forwarding": true,
+    "trusted_senders": ["family-flights@example.com"]
   }
 }
 ```

@@ -114,6 +114,11 @@ you fill this in, and `clawflight doctor` reports that as an error.
 
 ### mailbox — where confirmations arrive
 
+The README's headline workflow forwards airline email to this mailbox. A
+forwarded message arrives with its `From:` rewritten to the **forwarding
+mailbox**, so trust that address — not the airline domain. This is the working
+configuration for that workflow:
+
 ```json
 "mailbox": {
   "adapter": "imap",
@@ -121,9 +126,31 @@ you fill this in, and `clawflight doctor` reports that as an error.
   "username": "family-flights@example.com",
   "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
   "folder": "INBOX",
+  "forwarding": true,
+  "trusted_senders": ["family-flights@example.com"]
+}
+```
+
+If airline confirmations arrive **directly** in the watched mailbox instead
+of being forwarded, trust the airline domains instead:
+
+```json
+"mailbox": {
+  "adapter": "imap",
+  "host": "imap.gmail.com",
+  "username": "family-flights@example.com",
+  "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
+  "folder": "INBOX",
+  "forwarding": false,
   "trusted_senders": ["delta.com", "aa.com", "united.com"]
 }
 ```
+
+Trusting a forwarding address also trusts anything that mailbox relays. Use an
+address you control and keep it dedicated to flight confirmations.
+
+Set `forwarding` to `true` for the forwarding workflow so `clawflight doctor`
+can catch an airline-domain allow-list that would reject every forwarded message.
 
 `trusted_senders` holds exact addresses and base domains. A base domain matches
 itself and true subdomains only: `delta.com` matches `notify.delta.com` and
@@ -230,7 +257,7 @@ push upgrade — see [push-upgrade.md](push-upgrade.md).
 |---|---|
 | nothing is tracked | add one by hand: `clawflight flight add … --from … --depart …` |
 | a flight is tracked but silent | it needs `--from` and `--depart`; without a departure time the watch window never opens |
-| nothing is ingested from mail | `clawflight sweep --dry-run` — is the sender in `trusted_senders`? |
+| nothing is ingested from mail | `clawflight sweep --dry-run` — if `forwarding` is true, is the forwarding address in `trusted_senders`? |
 | flights say "Unknown" | pass `--person <key>` when adding, or add the airline's spelling to `match_substrings` |
 | no messages arrive | `clawflight doctor` — is `openclaw` on `PATH`, and does the recipient have a `channel`? |
 | deliveries keep failing | `clawflight doctor` reports outbox failures; the outbox retries with exponential backoff |

@@ -383,6 +383,64 @@ def test_mailbox_adapters_report_their_own_missing_settings(tmp_path, monkeypatc
     assert any("trusted_senders is empty" in message for message in untrusted_errors)
 
 
+def test_doctor_rejects_forwarding_mailbox_with_airline_domains_only(tmp_path) -> None:
+    payload = dict(
+        FULL,
+        mailbox={
+            "adapter": "imap",
+            "host": "imap.example.com",
+            "username": "family-flights@example.com",
+            "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
+            "forwarding": True,
+            "trusted_senders": ["delta.com", "aa.com"],
+        },
+    )
+
+    errors = _messages(load_config(_write(tmp_path, payload)), "error")
+
+    assert any("forwarding mailbox trusts only domains" in message for message in errors)
+
+
+def test_doctor_rejects_mbox_forwarding_with_airline_domains_only(tmp_path) -> None:
+    payload = dict(
+        FULL,
+        mailbox={
+            "adapter": "mbox",
+            "path": "forwarded-confirmations.mbox",
+            "forwarding": True,
+            "trusted_senders": ["delta.com", "aa.com"],
+        },
+    )
+
+    errors = _messages(load_config(_write(tmp_path, payload)), "error")
+
+    assert any("forwarding mailbox trusts only domains" in message for message in errors)
+
+
+def test_doctor_accepts_exact_forwarder_and_direct_airline_delivery(tmp_path) -> None:
+    forwarded = dict(
+        FULL,
+        mailbox={
+            "adapter": "imap",
+            "host": "imap.example.com",
+            "username": "family-flights@example.com",
+            "password_env": "CLAWFLIGHT_IMAP_PASSWORD",
+            "forwarding": True,
+            "trusted_senders": ["family-flights@example.com"],
+        },
+    )
+    direct = dict(
+        forwarded,
+        mailbox=dict(forwarded["mailbox"], forwarding=False, trusted_senders=["delta.com"]),
+    )
+
+    forwarded_errors = _messages(load_config(_write(tmp_path, forwarded)), "error")
+    direct_errors = _messages(load_config(_write(tmp_path, direct)), "error")
+
+    assert not any("forwarding mailbox trusts only domains" in message for message in forwarded_errors)
+    assert not any("forwarding mailbox trusts only domains" in message for message in direct_errors)
+
+
 def test_enabling_push_requires_its_key_secret_and_url(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("CLAWFLIGHT_RAPIDAPI_KEY", raising=False)
     monkeypatch.delenv("CLAWFLIGHT_WEBHOOK_SECRET", raising=False)
