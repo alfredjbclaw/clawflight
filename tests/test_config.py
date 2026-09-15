@@ -178,7 +178,9 @@ def test_the_state_directory_is_created_private(tmp_path) -> None:
     assert stat.S_IMODE(created.stat().st_mode) == 0o700
 
 
-def test_environment_overrides_win_over_the_config_file(tmp_path, monkeypatch) -> None:
+def test_state_directory_environment_override_wins_over_the_config_file(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setenv(STATE_DIR_ENV, str(tmp_path / "from-env"))
     path = _write(tmp_path, {"state_dir": str(tmp_path / "from-file")})
 
@@ -187,8 +189,63 @@ def test_environment_overrides_win_over_the_config_file(tmp_path, monkeypatch) -
     monkeypatch.delenv(STATE_DIR_ENV)
     assert load_config(path).state_dir == tmp_path / "from-file"
 
-    monkeypatch.setenv(CONFIG_PATH_ENV, str(path))
-    assert default_config_path() == path
+
+def test_default_config_path_moves_with_the_state_directory(tmp_path, monkeypatch) -> None:
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv(STATE_DIR_ENV, str(state_dir))
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+
+    assert default_config_path() == state_dir / "clawflight.json"
+
+
+def test_default_config_path_explicit_config_override_wins(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "custom.json"
+    monkeypatch.setenv(STATE_DIR_ENV, str(tmp_path / "state"))
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+
+    assert default_config_path() == config_path
+
+
+def test_default_config_path_without_overrides_uses_the_default_location(
+    tmp_path, monkeypatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv(STATE_DIR_ENV, raising=False)
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+
+    assert default_config_path() == (
+        home / ".openclaw" / "clawflight" / "clawflight.json"
+    )
+
+
+def test_state_dir_flag_moves_an_implicit_config_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv(STATE_DIR_ENV, raising=False)
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+    state_dir = tmp_path / "state"
+
+    config = with_state_dir(load_config(), state_dir)
+
+    assert config.state_dir == state_dir
+    assert config.source_path == state_dir / "clawflight.json"
+
+
+def test_state_dir_flag_preserves_an_explicit_config_path(tmp_path) -> None:
+    config_path = tmp_path / "custom.json"
+
+    config = with_state_dir(load_config(config_path), tmp_path / "state")
+
+    assert config.source_path == config_path
+
+
+def test_state_dir_flag_preserves_an_environment_config_path(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "custom.json"
+    monkeypatch.setenv(CONFIG_PATH_ENV, str(config_path))
+
+    config = with_state_dir(load_config(), tmp_path / "state")
+
+    assert config.source_path == config_path
 
 
 def test_tilde_paths_are_expanded(tmp_path) -> None:
@@ -275,6 +332,39 @@ def test_a_recipient_outside_the_people_table_is_only_informational(tmp_path) ->
     assert any(
         "neighbour" in f.message and f.severity == "info" for f in findings
     )
+
+
+def test_people_table_finding_depends_on_recipient_follow_scope(tmp_path) -> None:
+    follow_all = dict(
+        FULL,
+        recipients=[
+            {
+                "key": "family",
+                "name": "Family",
+                "follow_all": True,
+                "channel": {"channel": "telegram", "to": "-1001234567890"},
+            }
+        ],
+    )
+    explicit_only = dict(
+        follow_all,
+        recipients=[dict(follow_all["recipients"][0], follow_all=False)],
+    )
+
+    follow_all_findings = validate(load_config(_write(tmp_path, follow_all)))
+    explicit_findings = validate(load_config(_write(tmp_path, explicit_only)))
+
+    assert not any(
+        "family' is not in the people table" in f.message
+        for f in follow_all_findings
+    )
+    assert any(
+        "family' is not in the people table" in f.message
+        for f in explicit_findings
+    )
+    assert sum(f.severity == "error" for f in follow_all_findings) == sum(
+        f.severity == "error" for f in explicit_findings
+    ) == 0
 
 
 def test_mailbox_adapters_report_their_own_missing_settings(tmp_path, monkeypatch) -> None:

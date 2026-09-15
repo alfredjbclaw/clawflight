@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import shutil
 import signal
@@ -32,7 +33,15 @@ from .adapters.feed_adsb import PublicFeeds, offline_observer
 from .adapters.mailbox_mbox import MboxAdapter
 from .airports import AIRPORTS_CSV, default_airports
 from .audit import run_audit
-from .config import Config, ConfigError, load_config, validate, with_state_dir
+from .config import (
+    CONFIG_FILENAME,
+    CONFIG_PATH_ENV,
+    Config,
+    ConfigError,
+    load_config,
+    validate,
+    with_state_dir,
+)
 from . import manage
 from .models import FlightEvent, FlightRecord
 from .monitor import Monitor
@@ -189,7 +198,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         parser.print_help()
         return 2
     try:
-        config = load_config(args.config)
+        # ``--state-dir`` names the whole implicit state home, including its
+        # config.  A named config (either the flag or the environment) remains
+        # an explicit override.
+        config_path = args.config
+        if (
+            args.state_dir
+            and args.config is None
+            and not os.environ.get(CONFIG_PATH_ENV)
+        ):
+            config_path = Path(args.state_dir).expanduser() / CONFIG_FILENAME
+        config = load_config(config_path)
     except ConfigError as exc:
         _emit(args, {"ok": False, "error": str(exc)}, "config error: {}".format(exc))
         return 2
@@ -255,9 +274,16 @@ def cron_recipes(config: Config) -> List[str]:
         if config.source_path
         else ""
     )
+    state_flag = " --state-dir {}".format(shlex.quote(str(config.state_dir)))
     return [
-        _recipe("clawflight-tick", TICK_CRON, "{}{} tick".format(command, config_flag)),
-        _recipe("clawflight-sweep", SWEEP_CRON, "{}{} sweep".format(command, config_flag)),
+        _recipe(
+            "clawflight-tick", TICK_CRON,
+            "{}{}{} tick".format(command, config_flag, state_flag),
+        ),
+        _recipe(
+            "clawflight-sweep", SWEEP_CRON,
+            "{}{}{} sweep".format(command, config_flag, state_flag),
+        ),
     ]
 
 

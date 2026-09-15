@@ -88,6 +88,7 @@ class Config:
     horizon_days: int = DEFAULT_HORIZON_DAYS
     state_dir: Path = field(default_factory=lambda: Path(DEFAULT_STATE_DIR).expanduser())
     source_path: Optional[Path] = None
+    config_path_explicit: bool = False
 
     # -- resolved state paths ----------------------------------------------
 
@@ -173,6 +174,9 @@ def default_config_path() -> Path:
     override = os.environ.get(CONFIG_PATH_ENV)
     if override:
         return Path(override).expanduser()
+    state_dir = os.environ.get(STATE_DIR_ENV)
+    if state_dir:
+        return Path(state_dir).expanduser() / CONFIG_FILENAME
     return Path(DEFAULT_STATE_DIR).expanduser() / CONFIG_FILENAME
 
 
@@ -205,18 +209,29 @@ def load_config(path: Optional[object] = None) -> Config:
     A missing file yields an all-default Config: clawflight starts, attributes
     nothing, notifies nobody, and ``clawflight doctor`` explains what is needed.
     """
+    # An environment config path is just as intentional as a path supplied by
+    # a caller.  In particular, a later ``--state-dir`` override must not
+    # rewrite it to an implicit path under that state directory.
+    explicit_path = path is not None or bool(os.environ.get(CONFIG_PATH_ENV))
     resolved = Path(path).expanduser() if path is not None else default_config_path()
     try:
         text = resolved.read_text(encoding="utf-8")
     except (FileNotFoundError, IsADirectoryError):
-        return Config(source_path=resolved, state_dir=_state_dir_from(None))
+        return Config(
+            source_path=resolved,
+            state_dir=_state_dir_from(None),
+            config_path_explicit=explicit_path,
+        )
     except OSError as exc:
         raise ConfigError("config could not be read: {}".format(exc)) from exc
-    return from_mapping(loads(text), source_path=resolved)
+    return from_mapping(
+        loads(text), source_path=resolved, config_path_explicit=explicit_path
+    )
 
 
 def from_mapping(
-    payload: Mapping[str, Any], source_path: Optional[Path] = None
+    payload: Mapping[str, Any], source_path: Optional[Path] = None,
+    config_path_explicit: bool = False,
 ) -> Config:
     people = PersonTable.from_entries(payload.get("people"))
     recipients = RecipientConfig.from_entries(payload.get("recipients"))
@@ -231,6 +246,7 @@ def from_mapping(
         horizon_days=_horizon_from(payload.get("horizon_days")),
         state_dir=_state_dir_from(payload.get("state_dir")),
         source_path=source_path,
+        config_path_explicit=config_path_explicit,
     )
 
 
@@ -367,7 +383,11 @@ def validate(config: Config) -> List[Finding]:
                     "(needs channel.channel and channel.to).".format(recipient.key),
                 )
             )
-        if config.people and config.people.get(recipient.key) is None:
+        if (
+            config.people
+            and not recipient.follow_all
+            and config.people.get(recipient.key) is None
+        ):
             findings.append(
                 Finding(
                     "info",
@@ -441,4 +461,11 @@ def validate(config: Config) -> List[Finding]:
 
 def with_state_dir(config: Config, state_dir: object) -> Config:
     """Return a copy of *config* rooted at a different state directory."""
-    return replace(config, state_dir=Path(state_dir).expanduser())
+    resolved_state_dir = Path(state_dir).expanduser()
+    if config.source_path is not None and not config.config_path_explicit:
+        return replace(
+            config,
+            state_dir=resolved_state_dir,
+            source_path=resolved_state_dir / CONFIG_FILENAME,
+        )
+    return replace(config, state_dir=resolved_state_dir)

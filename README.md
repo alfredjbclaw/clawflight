@@ -59,15 +59,17 @@ pip install git+https://github.com/alfredjbclaw/clawflight
 
 clawflight person add sam --name Sam --match "sam kestrel"
 clawflight config set owner sam
-clawflight recipient add family --name Family \
-    --channel telegram --to "-1001234567890" --follow-all
+clawflight recipient add family --name Family --channel telegram --to "-1001234567890" --follow-all
 
-clawflight flight add DL767 --date 2026-09-12 \
-    --from JFK --to LAX --depart 16:55 --arrive 20:20 --person sam
+clawflight flight add DL767 --date 2026-09-12 --from JFK --to LAX --depart 16:55 --arrive 20:20 --person sam
 
-clawflight doctor     # says exactly what is still missing
+clawflight tick --offline --dry-run --now 1789227000
+clawflight doctor
 clawflight setup      # prints the two cron jobs to create
 ```
+
+In this mailbox-free setup, `doctor` reports one expected warning: `No mailbox
+adapter: itineraries must be supplied by another ingestion path.`
 
 That is a working tracker — no mailbox, no API key, no config file to edit.
 Point it at a [forwarding address](docs/setup.md) when you want confirmations
@@ -75,10 +77,14 @@ ingested automatically instead of typing flights in.
 
 Full walkthrough: **[docs/setup.md](docs/setup.md)**.
 
-Try it without configuring anything — this drives the whole pipeline over the
-synthetic fixtures, offline:
+## Demo from a checkout
+
+The pip-installed package does not include the demo fixtures. Clone the repository
+to run the offline synthetic-fixture demo:
 
 ```sh
+git clone https://github.com/alfredjbclaw/clawflight.git
+cd clawflight
 make demo
 ```
 
@@ -107,7 +113,7 @@ openclaw skills install @alfredjbclaw/clawflight
 Your agent then drives the verbs for you: *"follow Robin's flight"*,
 *"mute DL767"*, *"what flights are coming up?"*
 
-Build the bundle yourself with `make skill-bundle`.
+From a checkout, build the bundle yourself with `make skill-bundle`.
 
 ## Configuration in one glance
 

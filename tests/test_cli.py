@@ -9,7 +9,7 @@ import pytest
 
 from clawflight import __version__
 from clawflight.cli import SWEEP_CRON, TICK_CRON, build_parser, cron_recipes, main
-from clawflight.config import load_config
+from clawflight.config import CONFIG_PATH_ENV, STATE_DIR_ENV, load_config
 from clawflight.registry import Registry
 
 
@@ -137,6 +137,35 @@ def test_the_cron_recipes_carry_the_config_path() -> None:
     generic = cron_recipes(config)
     assert all(recipe.startswith("openclaw cron create") for recipe in generic)
     assert all("--session isolated --delivery none" in recipe for recipe in generic)
+
+
+def test_setup_cron_recipe_preserves_the_state_dir_and_config_path(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    import shlex
+
+    state_dir = tmp_path / "cron-state"
+    state_dir.mkdir()
+    config_path = state_dir / "clawflight.json"
+    config_path.write_text(json.dumps(_config_payload(tmp_path)), encoding="utf-8")
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+
+    code, setup = _json_run(
+        capsys, "--state-dir", str(state_dir), "--json", "setup"
+    )
+    assert code == 0
+    recipe_args = shlex.split(setup["cron"][0])
+    command_args = shlex.split(recipe_args[recipe_args.index("--command") + 1])
+    assert command_args[1:] == [
+        "--config", str(config_path), "--state-dir", str(state_dir), "tick",
+    ]
+
+    code, shown = _json_run(
+        capsys, *command_args[1:-1], "--json", "config", "show"
+    )
+    assert code == 0
+    assert shown["config_path"] == str(config_path)
+    assert shown["state_dir"] == str(state_dir)
 
 
 def test_setup_refuses_to_apply_while_the_config_has_errors(tmp_path, capsys) -> None:
@@ -636,6 +665,80 @@ def test_the_state_dir_flag_overrides_the_config_file(tmp_path, capsys) -> None:
     )
 
     assert payload["state_dir"] == str(override)
+    assert payload["config_path"] == str(path)
+
+
+def test_state_dir_flag_loads_the_implicit_config_from_that_directory(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    state_dir = tmp_path / "isolated-state"
+    state_dir.mkdir()
+    (state_dir / "clawflight.json").write_text(
+        json.dumps({"owner": "state-owner"}), encoding="utf-8"
+    )
+    home = tmp_path / "home"
+    default_dir = home / ".openclaw" / "clawflight"
+    default_dir.mkdir(parents=True)
+    (default_dir / "clawflight.json").write_text(
+        json.dumps({"owner": "default-owner"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+
+    _, payload = _json_run(
+        capsys, "--state-dir", str(state_dir), "--json", "config", "show"
+    )
+
+    assert payload["owner"] == "state-owner"
+    assert payload["config_path"] == str(state_dir / "clawflight.json")
+    assert payload["state_dir"] == str(state_dir)
+
+
+def test_quickstart_doctor_has_only_the_documented_mailbox_warning(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    state_dir = tmp_path / "quickstart"
+    monkeypatch.setenv(STATE_DIR_ENV, str(state_dir))
+    monkeypatch.delenv(CONFIG_PATH_ENV, raising=False)
+
+    commands = (
+        ("person", "add", "sam", "--name", "Sam", "--match", "sam kestrel"),
+        ("config", "set", "owner", "sam"),
+        (
+            "recipient", "add", "family", "--name", "Family", "--channel",
+            "telegram", "--to", "-1001234567890", "--follow-all",
+        ),
+        (
+            "flight", "add", "DL767", "--date", "2026-09-12", "--from", "JFK",
+            "--to", "LAX", "--depart", "16:55", "--arrive", "20:20", "--person", "sam",
+        ),
+        ("tick", "--offline", "--dry-run", "--now", "1789227000"),
+    )
+    for command in commands:
+        code, _ = _run(capsys, *command)
+        assert code == 0
+
+    code, payload = _json_run(capsys, "--json", "doctor")
+    warnings = [
+        finding["message"]
+        for findings in (payload["config_findings"], payload["audit_findings"])
+        for finding in findings
+        if finding["severity"] == "warning"
+    ]
+    all_messages = [
+        finding["message"]
+        for findings in (payload["config_findings"], payload["audit_findings"])
+        for finding in findings
+    ]
+
+    assert code == 0
+    assert [f for f in payload["config_findings"] if f["severity"] == "error"] == []
+    assert warnings == [
+        "No mailbox adapter: itineraries must be supplied by another ingestion path."
+    ]
+    assert not any("is not in the people table" in message for message in all_messages)
+    assert payload["config_path"] == str(state_dir / "clawflight.json")
+    assert payload["state_dir"] == str(state_dir)
 
 
 # -- cron recipes point at whatever is actually running ---------------------

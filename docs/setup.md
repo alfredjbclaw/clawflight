@@ -21,6 +21,19 @@ clawflight --version
 
 From a checkout: `pip install -e .`
 
+## Environment paths
+
+By default, clawflight keeps its config and state in
+`~/.openclaw/clawflight/`. The config file is
+`~/.openclaw/clawflight/clawflight.json` and the state directory is
+`~/.openclaw/clawflight`.
+
+- `CLAWFLIGHT_CONFIG` holds a path to a config **file**. It takes precedence
+  over `CLAWFLIGHT_STATE_DIR`; an explicit `--config` flag takes precedence over both.
+- `CLAWFLIGHT_STATE_DIR` holds a path to the state **directory**. When it is
+  set by itself, the config moves with it to
+  `$CLAWFLIGHT_STATE_DIR/clawflight.json`.
+
 ## 2. Optional: a forwarding address
 
 clawflight reads airline confirmations. It never reads the rest of your mail.
@@ -157,14 +170,9 @@ Nothing it does touches the network or writes to state.
 clawflight setup
 ```
 
-prints the two cron jobs to create:
-
-```sh
-openclaw cron create --name clawflight-tick  --cron "*/2 * * * *" \
-  --command "clawflight tick"  --session isolated --delivery none
-openclaw cron create --name clawflight-sweep --cron "17 * * * *" \
-  --command "clawflight sweep" --session isolated --delivery none
-```
+prints two cron jobs to create. Each includes the resolved `--config` and
+`--state-dir` paths, so the scheduled commands use the same configuration and state
+home as setup.
 
 Run them yourself, or `clawflight setup --apply` to run them for you (it
 refuses while the config still has errors).
