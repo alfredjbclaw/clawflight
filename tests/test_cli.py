@@ -635,6 +635,38 @@ def test_doctor_reports_a_complete_config_as_healthy(tmp_path, capsys) -> None:
     assert payload["outbound_cli"]["binary"] == "openclaw"
 
 
+def test_doctor_always_reports_the_plaintext_password_opt_in(
+    tmp_path, capsys, monkeypatch
+) -> None:
+    monkeypatch.setenv("CLAWFLIGHT_IMAP_PASSWORD", "synthetic-test-password")
+    path = _write_config(
+        tmp_path,
+        mailbox={
+            "adapter": "imap",
+            "host": "imap.example.test",
+            "username": "traveler@example.com",
+            "ssl": False,
+            "allow_insecure_plaintext_password": True,
+            "trusted_senders": ["air.example"],
+        },
+    )
+
+    code, payload = _json_run(capsys, "--config", str(path), "--json", "doctor")
+
+    warnings = [
+        finding["message"]
+        for finding in payload["config_findings"]
+        if finding["severity"] == "warning"
+    ]
+    assert code == 0
+    assert any(
+        "mailbox.allow_insecure_plaintext_password is active" in message
+        and "without TLS" in message
+        for message in warnings
+    )
+    assert "synthetic-test-password" not in json.dumps(payload)
+
+
 def test_doctor_exits_non_zero_and_explains_an_incomplete_config(tmp_path, capsys) -> None:
     path = _write_config(tmp_path, recipients=[], owner="")
 

@@ -454,6 +454,33 @@ def test_incomplete_imap_settings_raise_without_naming_the_password() -> None:
     assert "not-a-real-password" not in str(missing_password.value)
 
 
+def test_plaintext_imap_password_is_refused_before_opening_a_connection() -> None:
+    opened = []
+    adapter = _adapter(
+        _FakeIMAP([RAW]),
+        ssl=False,
+        connection_factory=lambda host, port, ssl: opened.append((host, port, ssl)),
+    )
+
+    with pytest.raises(ImapConfigError) as refused:
+        adapter.fetch()
+
+    assert "password without TLS" in str(refused.value)
+    assert "not-a-real-password" not in str(refused.value)
+    assert opened == []
+
+
+def test_explicit_plaintext_password_opt_in_allows_the_injected_connection() -> None:
+    server = _FakeIMAP([RAW])
+
+    messages = _adapter(
+        server, ssl=False, allow_insecure_plaintext_password=True
+    ).fetch()
+
+    assert [message.source_id for message in messages] == ["trip-2001@air.example"]
+    assert ("login", "family-flights@example.com", "not-a-real-password") in server.calls
+
+
 def test_the_password_is_read_at_call_time_and_never_stored() -> None:
     import os
 

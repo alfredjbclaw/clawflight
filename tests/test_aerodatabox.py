@@ -126,7 +126,6 @@ def test_subscription_client_uses_documented_paths_and_tracks_state(tmp_path) ->
     subscription_id = client.subscribe(" aa 4912 ")
     assert client.tracked_subscription_ids() == {"sub-1"}
     balance = client.balance()
-    client.refill(20)
     client.unsubscribe(subscription_id)
 
     assert subscription_id == "sub-1"
@@ -136,12 +135,7 @@ def test_subscription_client_uses_documented_paths_and_tracks_state(tmp_path) ->
         "https://api.example.test/subscriptions/webhook/FlightByNumber/AA4912?useCredits=true",
         {"url": "https://receiver.example.test/hook/secret", "maxDeliveryRetries": 2},
     )
-    assert calls[2] == (
-        "post",
-        "https://api.example.test/subscriptions/balance/refill",
-        {"credits": 20},
-    )
-    assert calls[3] == ("delete", "https://api.example.test/subscriptions/webhook/sub-1", None)
+    assert calls[2] == ("delete", "https://api.example.test/subscriptions/webhook/sub-1", None)
     assert json.loads(state_path.read_text()) == {"subscriptions": {}}
     assert stat.S_IMODE(state_path.stat().st_mode) == 0o600
 

@@ -124,9 +124,6 @@ class SubscriptionClient:
                 return int(value)
         return 0
 
-    def refill(self, credits: int) -> None:
-        self._http_post(self._url("/subscriptions/balance/refill"), {"credits": credits})
-
     def _url(self, path: str) -> str:
         return self._base_url + path
 
