@@ -1,6 +1,6 @@
 ---
 name: clawflight
-version: 0.3.0
+version: 0.3.1
 description: >-
   Watch family flights and alert a group chat or ntfy — takeoff, landing,
   delays, schedule changes, tight connections. Forward an airline confirmation
