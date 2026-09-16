@@ -55,14 +55,53 @@ Setting it up and changing it, all without editing a file:
 {baseDir}/clawflight config keys        # what is settable
 ```
 
-If the user has also installed the package (`pip install
-git+https://github.com/alfredjbclaw/clawflight`), a bare `clawflight` on PATH
-works too and is the same program. Prefer the bundled launcher: it is always
-present and always matches these instructions.
+If the user has also installed the package, a bare `clawflight` on PATH works
+too and is the same program. Prefer the bundled launcher: it is the supported
+path, is always present, and always matches these instructions.
 
 Add `--json` when you need to read fields rather than show text.
 `--recipient` defaults to the configured owner. Every verb accepts `--config`
 and `--state-dir`.
+
+## Data, permissions, and deletion
+
+This skill handles sensitive travel data. Its bundled CLI stores state locally
+in its resolved state directory: `~/.openclaw/clawflight` by default, or the
+directory selected by `--state-dir`, `CLAWFLIGHT_STATE_DIR`, or `state_dir` in
+the config. Its state files can include `clawflight.json` plus registry, monitor,
+follows, consent, subscriptions, and outbox files. It stores flights
+(including itinerary details and confirmation codes), traveller records,
+recipient names and channel targets, config values, follow/consent state, and
+pending or failed alert text in the outbox. A `--config` path or
+`CLAWFLIGHT_CONFIG` may place the config file outside that directory.
+
+When the optional mailbox is configured, the CLI reads and parses forwarded
+email bodies to extract itinerary details. It retains bounded extracted fields
+and provenance, not the email body itself. The configured IMAP mailbox is
+optional; adding flights by hand does not read email.
+
+The CLI makes outbound HTTPS requests to the public `api.adsb.lol` and FAA NAS
+flight feeds. It sends alert text only to each configured delivery target:
+through the `openclaw` subprocess for a configured channel, or directly to
+a configured ntfy topic. The optional `serve` command runs a local
+webhook receiver; it does not contact AeroDataBox. The CLI reads
+`CLAWFLIGHT_STATE_DIR` and `CLAWFLIGHT_CONFIG`, plus the environment variables
+named for the optional IMAP password, ntfy token, AeroDataBox key, and webhook
+secret; `serve` also reads `CLAWFLIGHT_WEBHOOK_PATH_PREFIX`. It does not store
+those secret values.
+
+To delete all local state, stop any scheduled jobs, then delete the resolved
+state directory. If `--config` or `CLAWFLIGHT_CONFIG` named a config outside
+that directory, delete that file too:
+
+```sh
+rm -rf ~/.openclaw/clawflight
+# Also remove the separately chosen --config / $CLAWFLIGHT_CONFIG file, if any.
+```
+
+Use `clawflight flight remove <id>`, `person remove <key>`, or `recipient
+remove <key>` when deleting only that record. See `docs/privacy.md` for the
+full data-handling details.
 
 ## Mapping what people say
 

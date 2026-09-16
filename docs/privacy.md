@@ -12,6 +12,15 @@ and this document states exactly what it does with them.
 | a source id and SHA-256 digest as provenance | the message the digest was taken from |
 | phase, announced events, last position | any location that is not an aircraft position |
 | composed alert text, pending until delivered | credentials of any kind |
+| recipient names, channel names, and delivery targets | email bodies |
+| config values, including mailbox and push settings | secret values |
+
+All of this state lives in the resolved `state_dir`: by default
+`~/.openclaw/clawflight`, or the directory selected by `--state-dir`,
+`CLAWFLIGHT_STATE_DIR`, or the config's `state_dir` value. Its files can include
+`clawflight.json`, `registry.json`, `monitor.json`, `follows.json`,
+`consent.json`, `subscriptions.json`, and `outbox.json`. `--config` or
+`CLAWFLIGHT_CONFIG` can put `clawflight.json` outside that directory.
 
 Ingestion is deliberately lossy. `email_ingest.py` produces an
 `EmailItineraryCandidate` carrying bounded fields plus an `EmailEvidence` whose
@@ -64,26 +73,42 @@ The engine provides the ledger; wiring the prompt into your chat is your
 choice. If you are tracking an adult who has not agreed to it, no amount of
 software design makes that okay.
 
-## Third parties
+## Network, subprocess, and environment access
 
-Polling-only mode contacts adsb.lol, adsbdb and the FAA NAS feed. Those requests
-carry a flight callsign — a public identifier already broadcast by the aircraft
-— and nothing about who is on board.
+Polling-only mode makes outbound HTTPS requests to `api.adsb.lol` and the FAA
+NAS feed. Those requests carry a flight callsign — a public identifier already
+broadcast by the aircraft — and nothing about who is on board.
 
-Push mode additionally sends flight numbers to AeroDataBox via RapidAPI, under
-their terms, and receives webhooks at a URL you control.
+Alert text leaves the machine only for a configured recipient: `openclaw message
+send` delivers configured chat channels through the `openclaw` subprocess, and
+the optional ntfy adapter posts it to its configured topic. Push mode is
+optional; `serve` starts a local webhook receiver and does not make an
+AeroDataBox request. The optional IMAP mailbox connects to the configured mail
+server to read messages.
+
+The CLI reads `CLAWFLIGHT_STATE_DIR` and `CLAWFLIGHT_CONFIG`. It also reads the
+environment variables named in config for an IMAP password, ntfy token,
+AeroDataBox key, and webhook secret; `serve` reads
+`CLAWFLIGHT_WEBHOOK_PATH_PREFIX`. Those variables provide secrets at use time;
+their values are not stored.
 
 No telemetry, analytics, or crash reporting of any kind is included.
 
 ## Deleting data
 
+Stop any scheduled jobs, then delete the resolved state directory. The default
+command is:
+
 ```sh
-rm -rf ~/.openclaw/clawflight    # everything clawflight knows
+rm -rf ~/.openclaw/clawflight
 ```
 
-Removing one flight: `clawflight status` for the id, then delete its entry from
-`registry.json` and `monitor.json`. Completed flights are pruned automatically
-30 days after departure, and acknowledged deliveries after 14 days.
+If `--state-dir`, `CLAWFLIGHT_STATE_DIR`, or `state_dir` selected a different
+directory, delete that directory instead. If `--config` or `CLAWFLIGHT_CONFIG`
+pointed outside the state directory, delete that config file too. Use
+`clawflight flight remove <id>`, `person remove <key>`, or `recipient remove
+<key>` to remove one record. Completed flights are pruned automatically 30 days
+after departure, and acknowledged deliveries after 14 days.
 
 ## For contributors
 

@@ -22,8 +22,8 @@ calendar export (optional adapter) ───────────────
                                                     ▼
                                      parse ▸ attribute ▸ registry
                                                     ▼
-                     watch loop (OpenClaw cron): adsb.lol + adsbdb + FAA NAS
-                            (opt-in: AeroDataBox push webhook)
+                     watch loop (OpenClaw cron): adsb.lol + FAA NAS
+                          (opt-in: local webhook receiver)
                                                     ▼
                                  events ▸ per-recipient fan-out ▸ outbox
                                                     ▼
@@ -33,10 +33,10 @@ calendar export (optional adapter) ───────────────
 ## Why it looks like this
 
 - **Zero signup by default.** The stock configuration uses only keyless public
-  feeds — [adsb.lol](https://adsb.lol) positions, [adsbdb](https://adsbdb.com)
-  routes, and FAA NAS airport status. No API keys, no webhooks, no tunnels, no
-  card. An [opt-in upgrade](docs/push-upgrade.md) adds airline-side gate and
-  schedule data.
+  feeds — [adsb.lol](https://adsb.lol) positions and FAA NAS airport status.
+  No API keys, no webhooks, no tunnels, no card. An
+  [opt-in upgrade](docs/push-upgrade.md) adds a local webhook receiver for
+  airline-side gate and schedule updates.
 - **Any channel.** Alerts go through `openclaw message send`, so Telegram,
   iMessage, WhatsApp, Discord, Slack, Signal and every channel plugin work with
   the same two lines of config.
@@ -154,7 +154,13 @@ No drive-home ETA (that needs a home address). No airline-site scraping. No
 retained message bodies — ingestion keeps a source id and a digest, and the
 message stays in your mailbox. No telemetry.
 
-See **[docs/privacy.md](docs/privacy.md)** for exactly what is stored, and
+The local state directory stores flight and traveller records, confirmation
+codes, recipient targets, and queued alert text; the config file stores config
+values and may be outside that directory. Optional mailbox ingestion parses
+forwarded email bodies but does not retain those bodies. The CLI queries public
+flight feeds and sends alert text only to configured channels or ntfy topics.
+See **[docs/privacy.md](docs/privacy.md)** for the full list, its deletion
+steps, and the CLI's network, subprocess, and environment access; see
 **[docs/architecture.md](docs/architecture.md)** for how it works.
 
 ## Documentation
