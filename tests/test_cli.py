@@ -646,7 +646,7 @@ def test_doctor_always_reports_the_plaintext_password_opt_in(
             "host": "imap.example.test",
             "username": "traveler@example.com",
             "ssl": False,
-            "allow_insecure_plaintext_password": True,
+            "allow_insecure_plaintext_login": True,
             "trusted_senders": ["air.example"],
         },
     )
@@ -660,7 +660,7 @@ def test_doctor_always_reports_the_plaintext_password_opt_in(
     ]
     assert code == 0
     assert any(
-        "mailbox.allow_insecure_plaintext_password is active" in message
+        "mailbox.allow_insecure_plaintext_login is active" in message
         and "without TLS" in message
         for message in warnings
     )

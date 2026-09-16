@@ -96,15 +96,17 @@ No telemetry, analytics, or crash reporting of any kind is included.
 
 ## Deleting data
 
-Stop any scheduled jobs, then delete the resolved state directory. The default
-command is:
+Stop any scheduled jobs, then delete the resolved state directory. Read the exact
+path back first — it moves with `--state-dir`, `CLAWFLIGHT_STATE_DIR` or `state_dir`,
+and the default is only the default:
 
 ```sh
-rm -rf ~/.openclaw/clawflight
+clawflight doctor          # prints the resolved state directory and config path
 ```
 
-If `--state-dir`, `CLAWFLIGHT_STATE_DIR`, or `state_dir` selected a different
-directory, delete that directory instead. If `--config` or `CLAWFLIGHT_CONFIG`
+Delete the directory that command reported, using whatever removal your system
+prefers. Doing so forgets every tracked flight, traveller, recipient and queued
+alert, and cannot be undone. If `--config` or `CLAWFLIGHT_CONFIG`
 pointed outside the state directory, delete that config file too. Use
 `clawflight flight remove <id>`, `person remove <key>`, or `recipient remove
 <key>` to remove one record. Completed flights are pruned automatically 30 days

@@ -51,7 +51,7 @@ class MailboxSettings:
     host: str = ""
     port: int = 993
     ssl: bool = True
-    allow_insecure_plaintext_password: bool = False
+    allow_insecure_plaintext_login: bool = False
     username: str = ""
     password_env: str = "CLAWFLIGHT_IMAP_PASSWORD"
     folder: str = "INBOX"
@@ -146,8 +146,8 @@ class Config:
                 "host": self.mailbox.host,
                 "port": self.mailbox.port,
                 "ssl": self.mailbox.ssl,
-                "allow_insecure_plaintext_password": (
-                    self.mailbox.allow_insecure_plaintext_password
+                "allow_insecure_plaintext_login": (
+                    self.mailbox.allow_insecure_plaintext_login
                 ),
                 "username": self.mailbox.username,
                 "password_env": self.mailbox.password_env,
@@ -285,8 +285,8 @@ def _mailbox_from(value: object) -> MailboxSettings:
         host=_text(value.get("host"), defaults.host),
         port=port if isinstance(port, int) and not isinstance(port, bool) else defaults.port,
         ssl=bool(value.get("ssl", defaults.ssl)),
-        allow_insecure_plaintext_password=(
-            value.get("allow_insecure_plaintext_password") is True
+        allow_insecure_plaintext_login=(
+            value.get("allow_insecure_plaintext_login") is True
         ),
         username=_text(value.get("username"), defaults.username),
         password_env=_text(value.get("password_env"), defaults.password_env),
@@ -420,11 +420,11 @@ def validate(config: Config) -> List[Finding]:
                 Finding("error", "imap mailbox needs both host and username.")
             )
         if not mailbox.ssl:
-            if mailbox.allow_insecure_plaintext_password:
+            if mailbox.allow_insecure_plaintext_login:
                 findings.append(
                     Finding(
                         "warning",
-                        "mailbox.allow_insecure_plaintext_password is active: "
+                        "mailbox.allow_insecure_plaintext_login is active: "
                         "the IMAP password may cross the network without TLS.",
                     )
                 )
@@ -434,7 +434,7 @@ def validate(config: Config) -> List[Finding]:
                         "error",
                         "plaintext IMAP password login is refused without TLS; "
                         "enable mailbox.ssl or explicitly set "
-                        "mailbox.allow_insecure_plaintext_password.",
+                        "mailbox.allow_insecure_plaintext_login.",
                     )
                 )
         if not os.environ.get(mailbox.password_env):

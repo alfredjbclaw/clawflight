@@ -474,7 +474,7 @@ def test_explicit_plaintext_password_opt_in_allows_the_injected_connection() -> 
     server = _FakeIMAP([RAW])
 
     messages = _adapter(
-        server, ssl=False, allow_insecure_plaintext_password=True
+        server, ssl=False, allow_insecure_plaintext_login=True
     ).fetch()
 
     assert [message.source_id for message in messages] == ["trip-2001@air.example"]

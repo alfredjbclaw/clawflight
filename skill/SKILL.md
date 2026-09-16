@@ -1,6 +1,6 @@
 ---
 name: clawflight
-version: 0.3.1
+version: 0.3.2
 description: >-
   Watch family flights and alert a group chat or ntfy — takeoff, landing,
   delays, schedule changes, tight connections. Forward an airline confirmation
@@ -95,9 +95,13 @@ state directory. If `--config` or `CLAWFLIGHT_CONFIG` named a config outside
 that directory, delete that file too:
 
 ```sh
-rm -rf ~/.openclaw/clawflight
-# Also remove the separately chosen --config / $CLAWFLIGHT_CONFIG file, if any.
+{baseDir}/clawflight doctor    # prints the resolved state directory and config path
 ```
+
+Delete those two paths yourself once you have read them back — the state directory
+and, if `--config` or `CLAWFLIGHT_CONFIG` named one outside it, that config file.
+Removing the state directory forgets every tracked flight, traveller, recipient and
+queued alert, and cannot be undone.
 
 Use `clawflight flight remove <id>`, `person remove <key>`, or `recipient
 remove <key>` when deleting only that record. See `docs/privacy.md` for the

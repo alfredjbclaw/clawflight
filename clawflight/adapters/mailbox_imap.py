@@ -48,7 +48,7 @@ class ImapAdapter:
         password_env: str = "CLAWFLIGHT_IMAP_PASSWORD",
         port: int = DEFAULT_PORT,
         ssl: bool = True,
-        allow_insecure_plaintext_password: bool = False,
+        allow_insecure_plaintext_login: bool = False,
         folder: str = DEFAULT_FOLDER,
         search: str = DEFAULT_SEARCH,
         mark_seen: bool = False,
@@ -60,7 +60,7 @@ class ImapAdapter:
         self.password_env = password_env
         self.port = port
         self.ssl = ssl
-        self.allow_insecure_plaintext_password = (allow_insecure_plaintext_password is True)
+        self.allow_insecure_plaintext_login = (allow_insecure_plaintext_login is True)
         self.folder = folder
         self.search = search
         self.mark_seen = mark_seen
@@ -72,10 +72,10 @@ class ImapAdapter:
             return []
         if not self.host or not self.username:
             raise ImapConfigError("imap adapter needs both host and username")
-        if not self.ssl and not self.allow_insecure_plaintext_password:
+        if not self.ssl and not self.allow_insecure_plaintext_login:
             raise ImapConfigError(
                 "refusing to send an IMAP password without TLS; "
-                "set allow_insecure_plaintext_password only if you accept that risk"
+                "set allow_insecure_plaintext_login only if you accept that risk"
             )
         password = self._environ.get(self.password_env)
         if not password:

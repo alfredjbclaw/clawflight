@@ -717,8 +717,8 @@ def _mailbox_adapter(override: Optional[str], config: Config):
             password_env=config.mailbox.password_env,
             port=config.mailbox.port,
             ssl=config.mailbox.ssl,
-            allow_insecure_plaintext_password=(
-                config.mailbox.allow_insecure_plaintext_password
+            allow_insecure_plaintext_login=(
+                config.mailbox.allow_insecure_plaintext_login
             ),
             folder=config.mailbox.folder,
         )
