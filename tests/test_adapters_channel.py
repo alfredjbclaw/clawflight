@@ -1,6 +1,9 @@
 """Delivery through ``openclaw message send``: argv, routing, failure modes."""
 from __future__ import annotations
 
+import logging
+import os
+
 import pytest
 
 from clawflight.adapters.channel_openclaw import (
@@ -11,7 +14,11 @@ from clawflight.adapters.channel_openclaw import (
     poster_router,
     subprocess_runner,
 )
-from clawflight.adapters.channel_ntfy import NtfyPoster
+from clawflight.adapters.channel_ntfy import (
+    NtfyPoster,
+    TOKEN_ENV,
+    _HttpsTokenRedirectHandler,
+)
 from clawflight.recipients import RecipientConfig
 
 
@@ -25,6 +32,17 @@ class _RecordingRunner:
     def __call__(self, argv, timeout):
         self.calls.append((list(argv), timeout))
         return self.code
+
+
+class _RecordingOpener:
+    """Captures ntfy requests instead of opening a socket."""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def __call__(self, request, timeout):
+        self.calls.append((request, timeout))
+        return 200
 
 
 CONFIG = RecipientConfig.from_entries(
@@ -120,6 +138,149 @@ def test_poster_dispatches_ntfy_and_keeps_other_channels_on_openclaw() -> None:
     assert isinstance(poster_for_recipient(CONFIG.get("ntfy"), runner=runner), NtfyPoster)
     assert isinstance(poster_for_recipient(CONFIG.get("sam"), runner=runner), OpenClawPoster)
     assert isinstance(poster_for_recipient(CONFIG.get("unknown"), runner=runner), OpenClawPoster)
+
+
+def test_ntfy_config_cannot_name_an_unrelated_environment_variable(monkeypatch) -> None:
+    unrelated_value = "invented-unrelated-value"
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", unrelated_value)
+    environment_lookups = []
+
+    def recording_get(name, default=None):
+        environment_lookups.append(name)
+        return original_get(name, default)
+
+    original_get = os.environ.get
+    monkeypatch.setattr("clawflight.adapters.channel_ntfy.os.environ.get", recording_get)
+    opener = _RecordingOpener()
+    config = RecipientConfig.from_entries(
+        [
+            {
+                "key": "ntfy-negative",
+                "name": "Ntfy Negative",
+                "channel": {
+                    "channel": "ntfy",
+                    "to": "https://ntfy.example.com/invented-topic",
+                    "token_env": "AWS_SECRET_ACCESS_KEY",
+                },
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="move the token") as raised:
+        poster_for_recipient(config.get("ntfy-negative"), opener=opener)
+
+    assert unrelated_value not in str(raised.value)
+    assert "AWS_SECRET_ACCESS_KEY" not in environment_lookups
+    assert opener.calls == []
+
+
+def test_ntfy_reads_only_the_fixed_token_at_each_send(monkeypatch) -> None:
+    first_value = "invented-first-bearer"
+    second_value = "invented-second-bearer"
+    opener = _RecordingOpener()
+    monkeypatch.setenv(TOKEN_ENV, first_value)
+    poster = NtfyPoster(
+        "https://ntfy.example.com/invented-topic",
+        token_env=TOKEN_ENV,
+        opener=opener,
+    )
+
+    assert poster.post("AA4912 gate update.")
+    monkeypatch.setenv(TOKEN_ENV, second_value)
+    assert poster.post("AA4912 boarding update.")
+
+    assert opener.calls[0][0].get_header("Authorization") == "Bearer " + first_value
+    assert opener.calls[1][0].get_header("Authorization") == "Bearer " + second_value
+    assert first_value not in vars(poster).values()
+    assert second_value not in vars(poster).values()
+
+
+def test_ntfy_rejects_token_authentication_over_http_without_sending() -> None:
+    opener = _RecordingOpener()
+
+    with pytest.raises(ValueError, match="requires an https URL"):
+        NtfyPoster(
+            "http://ntfy.example.com/invented-topic",
+            token_env=TOKEN_ENV,
+            opener=opener,
+        )
+
+    assert opener.calls == []
+
+
+def test_ntfy_rejects_authenticated_redirect_from_https_to_http(monkeypatch) -> None:
+    bearer_value = "invented-redirect-bearer"
+    monkeypatch.setenv(TOKEN_ENV, bearer_value)
+    attempted_requests = []
+
+    def redirecting_opener(request, timeout):
+        attempted_requests.append(request)
+        return _HttpsTokenRedirectHandler().redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "http://redirect.example.com/invented-topic",
+        )
+
+    poster = NtfyPoster(
+        "https://ntfy.example.com/invented-topic",
+        token_env=TOKEN_ENV,
+        opener=redirecting_opener,
+    )
+
+    assert poster.post("AA4912 gate update.") is False
+    assert len(attempted_requests) == 1
+    assert attempted_requests[0].full_url.startswith("https://")
+    assert attempted_requests[0].get_header("Authorization") == "Bearer " + bearer_value
+
+
+def test_ntfy_token_is_absent_from_logs_repr_and_validation_error(
+    monkeypatch, caplog
+) -> None:
+    bearer_value = "invented-private-bearer"
+    monkeypatch.setenv(TOKEN_ENV, bearer_value)
+    sent_opener = _RecordingOpener()
+    blocked_opener = _RecordingOpener()
+    poster = NtfyPoster(
+        "https://ntfy.example.com/invented-topic",
+        token_env=TOKEN_ENV,
+        opener=sent_opener,
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        assert poster.post("AA4912 gate update.")
+    with pytest.raises(ValueError) as raised:
+        NtfyPoster(
+            "http://ntfy.example.com/invented-topic",
+            token_env=TOKEN_ENV,
+            opener=blocked_opener,
+        )
+
+    assert bearer_value not in str(raised.value)
+    assert bearer_value not in repr(poster)
+    assert bearer_value not in caplog.text
+    assert blocked_opener.calls == []
+
+
+def test_ntfy_request_keeps_body_priority_base_url_and_rfc2047_title() -> None:
+    opener = _RecordingOpener()
+    poster = NtfyPoster(
+        "invented-topic",
+        base_url="https://ntfy.example.com",
+        title="✈️ AA4912 update",
+        opener=opener,
+    )
+
+    assert poster.post("AA4912 is delayed.", "critical")
+    request = opener.calls[0][0]
+
+    assert request.full_url == "https://ntfy.example.com/invented-topic"
+    assert request.get_method() == "POST"
+    assert request.data == "AA4912 is delayed.".encode("utf-8")
+    assert request.get_header("Priority") == "4"
+    assert request.get_header("Title").startswith("=?utf-8?")
 
 
 def test_the_router_resolves_each_recipient_to_its_own_channel() -> None:

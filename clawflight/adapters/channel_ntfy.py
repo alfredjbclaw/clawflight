@@ -1,8 +1,8 @@
 """Delivery through ntfy's HTTP publish endpoint.
 
 The opener is injected so tests can inspect the request without opening a
-socket. Authentication is read from its named environment variable only when a
-message is sent; it is never retained by the poster.
+socket. Authentication is read from the package-owned environment variable
+only when a message is sent; it is never retained by the poster.
 """
 from __future__ import annotations
 
@@ -10,14 +10,16 @@ import os
 import re
 from email.header import Header
 from typing import Callable, Optional
+from urllib.error import HTTPError
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..notify import NotificationPriority
 
 
 DEFAULT_BASE_URL = "https://ntfy.sh"
 DEFAULT_TIMEOUT_SECONDS = 30.0
+TOKEN_ENV = "CLAWFLIGHT_NTFY_TOKEN"
 
 # Alert text carries the marketed flight number. Keep the ntfy title short and
 # useful rather than copying its emoji-prefixed text.
@@ -31,9 +33,27 @@ _FLIGHT_IDENTIFIER = re.compile(
 Opener = Callable[[Request, float], int]
 
 
+class _HttpsTokenRedirectHandler(HTTPRedirectHandler):
+    """Refuse to move an authenticated publish request off HTTPS."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if req.has_header("Authorization") and urlparse(newurl).scheme.lower() != "https":
+            raise HTTPError(
+                newurl,
+                code,
+                "ntfy authentication redirect requires an https URL",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_HTTPS_TOKEN_OPENER = build_opener(_HttpsTokenRedirectHandler())
+
+
 def urllib_opener(request: Request, timeout: float) -> int:
     """Open one request with urllib and return its HTTP status."""
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - validated URL
+    with _HTTPS_TOKEN_OPENER.open(request, timeout=timeout) as response:  # noqa: S310
         return response.getcode()
 
 
@@ -54,7 +74,14 @@ class NtfyPoster:
         if not to:
             raise ValueError("an ntfy poster needs a topic")
         self.url = _post_url(to, base_url)
-        self.token_env = token_env
+        if token_env is not None and token_env != TOKEN_ENV:
+            raise ValueError(
+                "ntfy token_env must be {}; move the token to that environment "
+                "variable or omit token_env".format(TOKEN_ENV)
+            )
+        self._use_token = token_env is not None
+        if self._use_token and urlparse(self.url).scheme != "https":
+            raise ValueError("ntfy authentication requires an https URL")
         self.title = title
         self.tags = tags
         self.timeout = timeout
@@ -69,8 +96,8 @@ class NtfyPoster:
         title = self.title if self.title is not None else _title_from_text(text)
         _add_title_header(headers, title)
         _add_ascii_header(headers, "Tags", self.tags)
-        if self.token_env:
-            token = os.environ.get(self.token_env)
+        if self._use_token:
+            token = os.environ.get(TOKEN_ENV)
             if token:
                 _add_ascii_header(headers, "Authorization", "Bearer " + token)
         return Request(self.url, data=text.encode("utf-8"), headers=headers, method="POST")

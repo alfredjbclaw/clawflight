@@ -130,9 +130,15 @@ channel does not use threads.
 
 `adapters.channel_ntfy.NtfyPoster` posts with `urllib.request`. Its `to` may
 be a full `http(s)` topic URL, or a bare topic joined to `base_url`; bare topics
-default to `https://ntfy.sh`. `base_url` is optional. `token_env` is optional
-and names an environment variable: put only the variable name in config, never
-the token value. `title` and `tags` are optional ntfy headers. The poster sends
+default to `https://ntfy.sh`. `base_url` is optional. To use authentication,
+set `token_env` to the fixed value `CLAWFLIGHT_NTFY_TOKEN` and export the token
+under that name. The token is read when each message is sent and is sent only
+to an `https` URL. Omit `token_env` for unauthenticated publishing.
+
+Older configs that use another `token_env` name must move that token to
+`CLAWFLIGHT_NTFY_TOKEN` and replace the configured name. clawflight rejects the
+old setting with a migration error rather than silently publishing without
+authentication. `title` and `tags` are optional ntfy headers. The poster sends
 priority 4 for critical alerts and 3 for informational alerts.
 
 ```python

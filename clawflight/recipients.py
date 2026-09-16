@@ -3,7 +3,8 @@
 A recipient carries a channel-agnostic destination: ``{"channel": "telegram",
 "to": "-100…:topic:42"}`` or ``{"channel": "ntfy", "to": "topic"}``.
 OpenClaw targets work for Telegram, iMessage, WhatsApp, Discord, Slack, Signal,
-Matrix, and every channel plugin. ntfy also accepts ``base_url`` and ``token_env``.
+Matrix, and every channel plugin. ntfy also accepts ``base_url`` and the fixed
+``token_env`` value ``CLAWFLIGHT_NTFY_TOKEN``.
 
 The default configuration is EMPTY. A fresh install notifies nobody until the
 user names recipients.
