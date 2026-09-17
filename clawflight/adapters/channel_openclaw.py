@@ -26,7 +26,11 @@ Runner = Callable[[Sequence[str], float], int]
 
 
 def subprocess_runner(argv: Sequence[str], timeout: float) -> int:
-    """Default runner: run argv with no shell and a bounded timeout."""
+    """Run an explicit argv list with ``shell=False`` and a bounded timeout.
+
+    Callers build each argument as a separate list item; no user-controlled
+    value is interpreted by a shell.
+    """
     try:
         completed = subprocess.run(  # noqa: S603 - argv list, shell=False
             list(argv),

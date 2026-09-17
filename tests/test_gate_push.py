@@ -130,7 +130,8 @@ def test_a_push_notification_reaches_an_acknowledged_delivery(tmp_path, people) 
     joined = "\n".join(poster.calls)
     assert "Traveler: Alex" in joined
     assert "Route: ASE -> DFW" in joined
-    assert "New departure 13:51 (ASE local) / 15:51 ET" in joined
+    assert "New departure 13:51 (ASE local)" in joined
+    assert " ET" not in joined
 
 
 def test_replaying_the_same_notification_delivers_nothing_new(tmp_path, people) -> None:

@@ -78,6 +78,36 @@ def test_a_full_config_loads_every_section(tmp_path) -> None:
     assert config.source_path is not None
 
 
+def test_display_timezone_loads_and_is_listed_by_config_keys(
+    tmp_path, capsys
+) -> None:
+    from clawflight.cli import main
+
+    path = _write(tmp_path, {})
+
+    set_code = main(
+        [
+            "--config",
+            str(path),
+            "config",
+            "set",
+            "display_timezone",
+            "America/Los_Angeles",
+        ]
+    )
+    capsys.readouterr()
+
+    config = load_config(path)
+    code = main(["--config", str(path), "--json", "config", "keys"])
+    output = json.loads(capsys.readouterr().out)
+
+    assert set_code == 0
+    assert config.display_timezone == "America/Los_Angeles"
+    assert config.to_dict()["display_timezone"] == "America/Los_Angeles"
+    assert code == 0
+    assert "display_timezone" in output["settable"]
+
+
 def test_comments_and_trailing_commas_are_tolerated() -> None:
     text = """{
   // the person who gets unknown-person flights

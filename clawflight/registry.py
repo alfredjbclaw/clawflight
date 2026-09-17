@@ -52,7 +52,7 @@ class StatusChangeIds(list):
 
 def extract_service_date(update) -> Optional[str]:
     """Return the valid service date carried by a vendor update, if any."""
-    for source in (getattr(update, "service_date", None), update.departure_scheduled):
+    for source in (update.service_date, update.departure_scheduled):
         if isinstance(source, str) and len(source) >= 10:
             candidate = source[:10]
             try:

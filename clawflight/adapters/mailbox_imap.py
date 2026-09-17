@@ -131,8 +131,15 @@ def _first_body(data: Sequence[object]) -> Optional[bytes]:
 
 
 def _quietly(connection: object, method_name: str) -> None:
-    method = getattr(connection, method_name, None)
-    if method is None:
+    # Teardown may invoke only this explicit allowlist of IMAP methods.
+    try:
+        if method_name == "close":
+            method = connection.close
+        elif method_name == "logout":
+            method = connection.logout
+        else:
+            return
+    except AttributeError:
         return
     try:
         method()

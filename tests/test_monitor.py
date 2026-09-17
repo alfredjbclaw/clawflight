@@ -1019,7 +1019,7 @@ def test_landed_cancellation_is_recorded_without_alert() -> None:
     assert state["phase"] == "landed"
 
 
-def test_alerts_state_the_new_time_in_local_and_reference_zones(tmp_path) -> None:
+def test_alerts_default_to_labelled_airport_local_time(tmp_path) -> None:
     monitor = Monitor(str(tmp_path / "monitor.json"))
     record = _record()
     now = DEPARTURE - 3600
@@ -1039,6 +1039,60 @@ def test_alerts_state_the_new_time_in_local_and_reference_zones(tmp_path) -> Non
     events = monitor.ingest_push(update, now)
 
     delay = next(event for event in events if event.kind == "delay")
+    assert "New departure 12:45 (ASE local)" in delay.message
+    assert " ET" not in delay.message
+
+
+def test_alerts_use_the_configured_named_reference_zone(tmp_path) -> None:
+    monitor = Monitor(
+        str(tmp_path / "monitor.json"), display_timezone="America/Los_Angeles"
+    )
+    record = _record()
+    now = DEPARTURE - 3600
+    monitor.assess(record, _observation(record, fetched_at=now), _airports(), now)
+    update = normalize_notification(
+        {
+            "flight": {
+                "number": "AA4912",
+                "departure": {
+                    "scheduledTime": {"local": "2026-07-11T12:00:00-06:00"},
+                    "revisedTime": {"local": "2026-07-11T12:45:00-06:00"},
+                },
+            }
+        }
+    )[0]
+
+    events = monitor.ingest_push(update, now)
+
+    delay = next(event for event in events if event.kind == "delay")
+    assert (
+        "New departure 12:45 (ASE local) / 11:45 America/Los_Angeles"
+        in delay.message
+    )
+
+
+def test_new_york_reference_keeps_the_existing_et_rendering(tmp_path) -> None:
+    monitor = Monitor(
+        str(tmp_path / "monitor.json"), display_timezone="America/New_York"
+    )
+    record = _record()
+    now = DEPARTURE - 3600
+    monitor.assess(record, _observation(record, fetched_at=now), _airports(), now)
+    update = normalize_notification(
+        {
+            "flight": {
+                "number": "AA4912",
+                "departure": {
+                    "scheduledTime": {"local": "2026-07-11T12:00:00-06:00"},
+                    "revisedTime": {"local": "2026-07-11T12:45:00-06:00"},
+                },
+            }
+        }
+    )[0]
+
+    delay = next(
+        event for event in monitor.ingest_push(update, now) if event.kind == "delay"
+    )
     assert "New departure 12:45 (ASE local) / 14:45 ET" in delay.message
 
 

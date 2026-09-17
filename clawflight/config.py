@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .people import PersonTable, to_entries
 from .recipients import RecipientConfig
@@ -91,6 +92,7 @@ class Config:
     state_dir: Path = field(default_factory=lambda: Path(DEFAULT_STATE_DIR).expanduser())
     source_path: Optional[Path] = None
     config_path_explicit: bool = False
+    display_timezone: Optional[str] = None
 
     # -- resolved state paths ----------------------------------------------
 
@@ -167,6 +169,7 @@ class Config:
                 "path_prefix": self.push.path_prefix,
             },
             "horizon_days": self.horizon_days,
+            "display_timezone": self.display_timezone,
             "state_dir": str(self.state_dir),
         }
 
@@ -250,6 +253,7 @@ def from_mapping(
         mailbox=_mailbox_from(payload.get("mailbox")),
         push=_push_from(payload.get("push")),
         horizon_days=_horizon_from(payload.get("horizon_days")),
+        display_timezone=_display_timezone_from(payload.get("display_timezone")),
         state_dir=_state_dir_from(payload.get("state_dir")),
         source_path=source_path,
         config_path_explicit=config_path_explicit,
@@ -269,6 +273,17 @@ def _horizon_from(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return DEFAULT_HORIZON_DAYS
     return max(0, min(MAX_HORIZON_DAYS, value))
+
+
+def _display_timezone_from(value: object) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    name = value.strip()
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    return name
 
 
 def _mailbox_from(value: object) -> MailboxSettings:

@@ -21,6 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import __version__
 from .adapters.channel_openclaw import DEFAULT_BINARY, binary_available, poster_router
@@ -356,7 +357,7 @@ def _cmd_tick(args: argparse.Namespace, config: Config) -> int:
         _emit(args, {"checked": 0, "idle": True, "events": []}, "idle")
         return 0
 
-    monitor = Monitor(str(config.monitor_path))
+    monitor = Monitor(str(config.monitor_path), config.display_timezone)
     outbox = DeliveryOutbox(str(config.outbox_path))
     store = FollowStore(str(config.follows_path))
     poster = FakePoster()
@@ -389,7 +390,7 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
     now = args.now if args.now is not None else _now()
     config.ensure_state_dir()
     registry = Registry(str(config.registry_path), config.people)
-    monitor = Monitor(str(config.monitor_path))
+    monitor = Monitor(str(config.monitor_path), config.display_timezone)
     outbox = DeliveryOutbox(str(config.outbox_path))
 
     adapter = _mailbox_adapter(args.mailbox, config)
@@ -448,7 +449,7 @@ def _cmd_sweep(args: argparse.Namespace, config: Config) -> int:
             if not changed:
                 target = (
                     cancellations["ignored"]
-                    if getattr(changed, "matched", False)
+                    if changed.matched
                     else cancellations["unmatched"]
                 )
                 target.append(code)
@@ -526,7 +527,7 @@ def _cmd_serve(args: argparse.Namespace, config: Config) -> int:
             ).matching_bookings(update)
 
     registry = LiveRegistry()
-    monitor = Monitor(str(config.monitor_path))
+    monitor = Monitor(str(config.monitor_path), config.display_timezone)
     outbox = DeliveryOutbox(str(config.outbox_path))
     store = FollowStore(str(config.follows_path))
     handler = push_handler(
@@ -565,7 +566,9 @@ def _cmd_serve(args: argparse.Namespace, config: Config) -> int:
 
 def _cmd_status(args: argparse.Namespace, config: Config) -> int:
     registry = Registry(str(config.registry_path), config.people)
-    monitor_state = Monitor(str(config.monitor_path)).state_snapshot()
+    monitor_state = Monitor(
+        str(config.monitor_path), config.display_timezone
+    ).state_snapshot()
     rows = []
     for record in registry.all_records():
         rows.append(
@@ -606,7 +609,13 @@ def _cmd_follow(args: argparse.Namespace, config: Config) -> int:
         )
         return 2
     store = FollowStore(str(config.follows_path))
-    getattr(store, args.command)(recipient, args.flight_id)
+    follow_commands = {
+        "follow": store.follow,
+        "unfollow": store.unfollow,
+        "mute": store.mute,
+        "unmute": store.unmute,
+    }
+    follow_commands[args.command](recipient, args.flight_id)
     payload = {
         "ok": True,
         "action": args.command,
@@ -726,7 +735,7 @@ def _mailbox_adapter(override: Optional[str], config: Config):
 
 
 def _emit(args: argparse.Namespace, payload: dict, text: str) -> None:
-    if getattr(args, "json", False):
+    if args.json:
         sys.stdout.write(json.dumps(payload, sort_keys=True) + "\n")
     elif text:
         sys.stdout.write(text + "\n")
@@ -886,7 +895,7 @@ def _cmd_flight(args: argparse.Namespace, config: Config) -> int:
                 args, manage.ManageError("no tracked flight {!r}".format(args.flight_id))
             )
         removed = registry.forget(args.flight_id)
-        Monitor(str(config.monitor_path)).forget(args.flight_id)
+        Monitor(str(config.monitor_path), config.display_timezone).forget(args.flight_id)
         payload = {"ok": True, "removed": removed, "flight_id": args.flight_id}
         _emit(args, payload, "removed {}".format(args.flight_id))
         return 0
@@ -948,7 +957,7 @@ def _cmd_config(args: argparse.Namespace, config: Config) -> int:
         return 0
 
     if args.verb == "keys":
-        keys = sorted(manage.SETTABLE)
+        keys = sorted(set(manage.SETTABLE) | {"display_timezone"})
         _emit(args, {"settable": keys}, "\n".join(keys))
         return 0
 
@@ -963,12 +972,35 @@ def _cmd_config(args: argparse.Namespace, config: Config) -> int:
         return 0
 
     try:
+        if args.setting == "display_timezone":
+            apply_setting = lambda document: _set_display_timezone(
+                document, args.value
+            )
+        else:
+            apply_setting = lambda document: manage.set_setting(
+                document, args.setting, args.value
+            )
         path, changed, notes = _mutate(
-            args, config, lambda document: manage.set_setting(document, args.setting, args.value)
+            args, config, apply_setting
         )
     except manage.ManageError as exc:
         return _manage_error(args, exc)
     return _manage_result(args, path, changed, "{} = {}".format(args.setting, args.value), notes)
+
+
+def _set_display_timezone(document: dict, value: str) -> bool:
+    """Set the reference zone after validating its IANA name."""
+    name = value.strip()
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise manage.ManageError(
+            "display_timezone must be a named IANA zone, got {!r}".format(value)
+        )
+    if document.get("display_timezone") == name:
+        return False
+    document["display_timezone"] = name
+    return True
 
 
 if __name__ == "__main__":  # pragma: no cover

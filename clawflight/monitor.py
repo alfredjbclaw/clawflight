@@ -41,7 +41,11 @@ LANDING_GRACE_SECONDS = 1800.0
 MIN_ALERT_DELTA_MINUTES = 15
 
 
-def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEvent]:
+def ingest_push(
+    update: FlightUpdate,
+    state: Dict[str, object],
+    display_timezone: Optional[str] = None,
+) -> List[FlightEvent]:
     now_epoch = state.get("_now_epoch")
     timestamp = (
         float(now_epoch) if isinstance(now_epoch, (int, float)) else update_timestamp()
@@ -86,7 +90,9 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
         )
     origin_code = _state_string(state, "origin")
     dest_code = _state_string(state, "dest")
-    times_phrase = _revised_times_phrase(update, origin_code, dest_code)
+    times_phrase = _revised_times_phrase(
+        update, origin_code, dest_code, display_timezone
+    )
     announced_dep = _announced_list(state, "announced_dep_revisions")
     announced_arr = _announced_list(state, "announced_arr_revisions")
     previous_revised = state.get("departure_revised")
@@ -217,9 +223,12 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
         state["last_alerted_arr_revised"] = update.arrival_revised
     if update.arrival_revised is not None and update.arrival_revised not in announced_arr:
         announced_arr.append(update.arrival_revised)
-    for field, label in (("departure_gate", "departure"), ("arrival_gate", "arrival")):
+    gate_fields = {
+        "departure_gate": ("departure", update.departure_gate),
+        "arrival_gate": ("arrival", update.arrival_gate),
+    }
+    for field, (label, current) in gate_fields.items():
         previous = state.get(field)
-        current = getattr(update, field)
         if current is not None and isinstance(previous, str) and previous != current:
             events.append(
                 FlightEvent(
@@ -242,19 +251,19 @@ def ingest_push(update: FlightUpdate, state: Dict[str, object]) -> List[FlightEv
 def _record_push(
     update: FlightUpdate, state: Dict[str, object], timestamp: float
 ) -> None:
-    for field in (
-        "status",
-        "departure_scheduled",
-        "departure_revised",
-        "arrival_scheduled",
-        "arrival_revised",
-        "departure_terminal",
-        "departure_gate",
-        "arrival_terminal",
-        "arrival_gate",
-        "arrival_baggage_belt",
-    ):
-        value = getattr(update, field)
+    fields = {
+        "status": update.status,
+        "departure_scheduled": update.departure_scheduled,
+        "departure_revised": update.departure_revised,
+        "arrival_scheduled": update.arrival_scheduled,
+        "arrival_revised": update.arrival_revised,
+        "departure_terminal": update.departure_terminal,
+        "departure_gate": update.departure_gate,
+        "arrival_terminal": update.arrival_terminal,
+        "arrival_gate": update.arrival_gate,
+        "arrival_baggage_belt": update.arrival_baggage_belt,
+    }
+    for field, value in fields.items():
         if value is not None:
             state[field] = value
     state["flight_number"] = update.flight_number
@@ -266,9 +275,10 @@ def update_timestamp() -> float:
 
 
 class Monitor:
-    def __init__(self, state_path: str) -> None:
+    def __init__(self, state_path: str, display_timezone: Optional[str] = None) -> None:
         self._state_path = state_path
         self._lock_path = state_path + ".lock"
+        self._display_timezone = display_timezone
         self._state = self._load_state()
         self._lock = threading.RLock()
 
@@ -601,7 +611,7 @@ class Monitor:
                 )
             )
             state["_now_epoch"] = now_epoch
-            events = ingest_push(update, state)
+            events = ingest_push(update, state, self._display_timezone)
             state.pop("_now_epoch", None)
             self._write_state()
             return events
@@ -632,7 +642,7 @@ class Monitor:
             if leg.dest:
                 state.setdefault("dest", leg.dest)
             state["_now_epoch"] = now_epoch
-            physical_events = ingest_push(update, state)
+            physical_events = ingest_push(update, state, self._display_timezone)
             state.pop("_now_epoch", None)
             self._write_state()
         return [
@@ -962,14 +972,14 @@ def _anomaly_revisions(state: Dict[str, object]) -> List[str]:
     return announced
 
 
-_EASTERN = "America/New_York"
-
-
-def _local_and_reference(iso: Optional[str], code: Optional[str]) -> Optional[str]:
-    """Render a revised time as ``HH:MM (CODE local) / HH:MM ET``.
+def _local_and_reference(
+    iso: Optional[str], code: Optional[str], display_timezone: Optional[str]
+) -> Optional[str]:
+    """Render airport-local time and an optional configured reference time.
 
     The ISO string already carries the airport-local offset, so local wall time
-    needs no timezone table; the reference zone is derived by conversion.
+    needs no timezone table. A reference conversion is shown only when the user
+    selected one.
     """
     if iso is None:
         return None
@@ -981,22 +991,30 @@ def _local_and_reference(iso: Optional[str], code: Optional[str]) -> Optional[st
     if parsed.tzinfo is None:
         return None
     local = parsed.strftime("%H:%M")
-    try:
-        reference = parsed.astimezone(ZoneInfo(_EASTERN)).strftime("%H:%M")
-    except ZoneInfoNotFoundError:
-        reference = local
     label = "{} ({} local)".format(local, code) if code else local
-    return "{} / {} ET".format(label, reference)
+    if display_timezone is None:
+        return label
+    try:
+        reference = parsed.astimezone(ZoneInfo(display_timezone)).strftime("%H:%M")
+    except (ZoneInfoNotFoundError, ValueError):
+        return label
+    reference_label = "ET" if display_timezone == "America/New_York" else display_timezone
+    return "{} / {} {}".format(label, reference, reference_label)
 
 
 def _revised_times_phrase(
-    update: FlightUpdate, origin: Optional[str], dest: Optional[str]
+    update: FlightUpdate,
+    origin: Optional[str],
+    dest: Optional[str],
+    display_timezone: Optional[str] = None,
 ) -> str:
     parts = []
-    departure = _local_and_reference(update.departure_revised, origin)
+    departure = _local_and_reference(
+        update.departure_revised, origin, display_timezone
+    )
     if departure is not None:
         parts.append("New departure " + departure)
-    arrival = _local_and_reference(update.arrival_revised, dest)
+    arrival = _local_and_reference(update.arrival_revised, dest, display_timezone)
     if arrival is not None:
         parts.append("New arrival " + arrival)
     return " · ".join(parts)

@@ -68,7 +68,20 @@ copy it to `~/.openclaw/clawflight/clawflight.json`. Note that the commands
 rewrite it as plain JSON, so hand-written comments are lost on the first
 `config set`.
 
-Four things to fill in.
+Four core sections need values; the reference timezone is optional.
+
+### display_timezone — optional reference time
+
+Alerts always label airport-local times, such as `13:51 (ASE local)`. Leave
+`display_timezone` unset to show only those local times. To add a familiar
+reference time, set a named IANA zone:
+
+```sh
+clawflight config set display_timezone America/Los_Angeles
+```
+
+The same setting in JSON is `"display_timezone": "America/Los_Angeles"`.
+Setting it to `America/New_York` keeps the prior `ET` reference label.
 
 ### people — who is being tracked
 
