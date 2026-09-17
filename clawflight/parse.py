@@ -9,7 +9,11 @@ Two independent front doors feed the same :class:`ParsedFlight` shape:
   receipt / trip-confirmation / schedule-change layouts.
 
 Both are total functions over untrusted text: malformed input yields an empty
-list rather than an exception.
+list rather than an exception. These parsers read travel-related personal data,
+including traveler names, confirmation codes, seats, schedules, routes, and
+calendar details. They return that data to the ingestion pipeline, which stores
+the selected itinerary and traveler metadata in the local ``registry.json``;
+this module does not write files or send data elsewhere.
 """
 from __future__ import annotations
 
@@ -366,7 +370,13 @@ def _month_date(month: str, day: str, year: int) -> "Optional[str]":
 
 
 def parse_airline_email(text: str, default_year: int) -> "list[ParsedFlight]":
-    """Parse the airline receipt and change-notice layouts."""
+    """Read itinerary data from an airline receipt or change notice.
+
+    The returned records can include traveler names, confirmation codes, seat
+    assignments, flight numbers, travel dates, airports, and scheduled times.
+    The caller may persist them in the local itinerary registry; this parser
+    itself neither stores nor sends the source email.
+    """
     if (
         not isinstance(text, str)
         or not text
@@ -400,6 +410,13 @@ def parse_airline_email(text: str, default_year: int) -> "list[ParsedFlight]":
 
 
 def _parse_receipt(text: str, default_year: int) -> "list[ParsedFlight]":
+    """Read receipt itinerary and traveler data for local registry storage.
+
+    Returned records include passenger names, confirmation codes, seats, flight
+    numbers, routes, travel dates, and scheduled times when present. The caller
+    may write them to local ``registry.json``; this function stores and sends
+    none of the source receipt itself.
+    """
     confirmation = re.search(
         r"(?im)^\s*(?:\*+\s*)?Confirmation Number\s*(?:\*+\s*)?"
         r"(?:[:#]\s*)?([A-Z0-9]{5,8})\b",
@@ -1014,6 +1031,14 @@ def _airline_parsed_flight(
 
 
 def parse_calendar_events(text: str, default_year: int) -> "list[ParsedFlight]":
+    """Read flight and traveler metadata from a calendar text export.
+
+    Each returned record can carry the event title, calendar name, attendee
+    email addresses, location, event identifier, the first 500 characters of
+    note contents, passenger name, confirmation code, seat, route, and times.
+    The ingestion pipeline may store selected fields in local ``registry.json``;
+    this parser itself does not write the calendar export or send it elsewhere.
+    """
     parsed = []
     for event_date, title, fields, notes in _event_blocks(text, default_year):
         designators = _designators(title, notes)
@@ -1346,6 +1371,12 @@ def _seat_for_leg(notes: str, carrier: str, number: int) -> "Optional[str]":
 
 
 def _hints(title: str, fields: dict, notes: str) -> dict:
+    """Capture calendar metadata used for attribution and local persistence.
+
+    The hints include attendee email addresses, location, calendar and event
+    identifiers, title, and up to 500 characters of note contents. Callers use
+    them to attribute a traveler and build records for local ``registry.json``.
+    """
     attendees = re.findall(r"[\w.+-]+@[\w.-]+", fields.get("attendees", ""))
     hints = {
         "title": title,

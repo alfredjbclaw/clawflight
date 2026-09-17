@@ -1,4 +1,4 @@
-"""Itinerary consent: prompt scheduling, decisions, expiry, and leg aggregation."""
+"""Itinerary consent: request scheduling, decisions, expiry, and leg aggregation."""
 import json
 
 import pytest
@@ -9,6 +9,7 @@ from clawflight.consent import (
     STAGE_24H,
     STAGE_48H,
     ConsentLedger,
+    ConsentRequest,
     itinerary_key,
 )
 
@@ -24,7 +25,7 @@ def _ledger(tmp_path, owner: str = OWNER) -> ConsentLedger:
 
 
 def _due(ledger, key, traveler, hours_before, arrival=ARRIVAL):
-    return ledger.prompts_due(
+    return ledger.requests_due(
         itinerary_key=key,
         traveler_key=traveler,
         first_departure_epoch=DEPARTURE,
@@ -39,15 +40,16 @@ def test_the_owner_gets_t48_then_one_unanswered_t24_reminder(tmp_path) -> None:
 
     assert _due(ledger, key, OWNER, 49) == ()
     first = _due(ledger, key, "Alex", 48)
-    assert [prompt.stage for prompt in first] == [STAGE_48H]
+    assert isinstance(first[0], ConsentRequest)
+    assert [request.stage for request in first] == [STAGE_48H]
     assert first[0].due_at_epoch == DEPARTURE - 48 * HOUR
     assert _due(ledger, key, OWNER, 47) == ()
-    assert [prompt.stage for prompt in _due(ledger, key, OWNER, 24)] == [STAGE_24H]
+    assert [request.stage for request in _due(ledger, key, OWNER, 24)] == [STAGE_24H]
     assert _due(ledger, key, OWNER, 23) == ()
 
     reloaded = _ledger(tmp_path).get(key)
     assert reloaded is not None
-    assert dict(reloaded.prompt_timestamps) == {
+    assert dict(reloaded.request_timestamps) == {
         STAGE_48H: DEPARTURE - 48 * HOUR,
         STAGE_24H: DEPARTURE - 24 * HOUR,
     }
@@ -61,12 +63,12 @@ def test_a_non_owner_gets_only_t24_and_a_late_run_is_not_doubled(tmp_path) -> No
     assert _due(ledger, other, "sam", 25) == ()
     assert [item.stage for item in _due(ledger, other, "sam", 24)] == [STAGE_24H]
     assert _due(ledger, other, "sam", 20) == ()
-    # A first run inside the T-24 window emits one prompt, never both stages.
+    # A first run inside the T-24 window emits one request, never both stages.
     assert [item.stage for item in _due(ledger, owner, OWNER, 20)] == [STAGE_24H]
     assert _due(ledger, owner, OWNER, 19) == ()
 
 
-def test_an_unconfigured_owner_means_nobody_gets_the_early_prompt(tmp_path) -> None:
+def test_an_unconfigured_owner_means_nobody_gets_the_early_request(tmp_path) -> None:
     ledger = _ledger(tmp_path, owner="")
     key = itinerary_key("fake20")
 
@@ -163,6 +165,33 @@ def test_missing_and_corrupt_ledgers_recover_and_write_valid_state(tmp_path) -> 
     assert ConsentLedger(str(path), owner_key=OWNER).get(key) is not None
 
 
+def test_a_legacy_request_stage_key_is_loaded_and_migrated(tmp_path) -> None:
+    path = tmp_path / "consent.json"
+    ledger = ConsentLedger(str(path), owner_key=OWNER)
+    key = itinerary_key("FAKE41")
+    assert [item.stage for item in _due(ledger, key, OWNER, 48)] == [STAGE_48H]
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    entry = payload["itineraries"][key]
+    legacy_key = "prompts"
+    entry[legacy_key] = entry.pop("requests")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    reloaded = ConsentLedger(str(path), owner_key=OWNER)
+    assert dict(reloaded.get(key).request_timestamps) == {
+        STAGE_48H: DEPARTURE - 48 * HOUR
+    }
+    reloaded.record_decision(
+        itinerary_key=key,
+        decision=OPT_IN,
+        now_epoch=DEPARTURE - 40 * HOUR,
+        final_arrival_epoch=ARRIVAL,
+    )
+    migrated = json.loads(path.read_text(encoding="utf-8"))["itineraries"][key]
+    assert "requests" in migrated
+    assert legacy_key not in migrated
+
+
 def test_a_shared_confirmation_has_one_decision_across_its_legs(tmp_path) -> None:
     ledger = _ledger(tmp_path)
     first_leg_key = itinerary_key(" fake50 ", "first-leg")
@@ -171,7 +200,7 @@ def test_a_shared_confirmation_has_one_decision_across_its_legs(tmp_path) -> Non
 
     _due(ledger, first_leg_key, OWNER, 48, arrival=DEPARTURE + 2 * HOUR)
     second_arrival = ARRIVAL + 24 * HOUR
-    ledger.prompts_due(
+    ledger.requests_due(
         itinerary_key=second_leg_key,
         traveler_key=OWNER,
         first_departure_epoch=DEPARTURE + 10 * HOUR,
@@ -192,13 +221,13 @@ def test_a_shared_confirmation_has_one_decision_across_its_legs(tmp_path) -> Non
     assert state.expires_at_epoch == second_arrival
 
 
-def test_prompt_timing_uses_the_itinerary_first_departure(tmp_path) -> None:
+def test_request_timing_uses_the_itinerary_first_departure(tmp_path) -> None:
     ledger = _ledger(tmp_path)
     key = itinerary_key("FAKE60")
     now = DEPARTURE - 49 * HOUR
 
     assert (
-        ledger.prompts_due(
+        ledger.requests_due(
             itinerary_key=key,
             traveler_key=OWNER,
             first_departure_epoch=DEPARTURE,
@@ -208,9 +237,9 @@ def test_prompt_timing_uses_the_itinerary_first_departure(tmp_path) -> None:
         == ()
     )
     # The second leg is inside its own T-48 window, but the itinerary's first
-    # departure is still 49 hours away, so no itinerary-level prompt is due.
+    # departure is still 49 hours away, so no itinerary-level request is due.
     assert (
-        ledger.prompts_due(
+        ledger.requests_due(
             itinerary_key=key,
             traveler_key=OWNER,
             first_departure_epoch=DEPARTURE + 24 * HOUR,
@@ -221,7 +250,7 @@ def test_prompt_timing_uses_the_itinerary_first_departure(tmp_path) -> None:
     )
     assert [
         item.stage
-        for item in ledger.prompts_due(
+        for item in ledger.requests_due(
             itinerary_key=key,
             traveler_key=OWNER,
             first_departure_epoch=DEPARTURE + 24 * HOUR,
@@ -275,14 +304,16 @@ def test_separately_loaded_ledgers_cannot_claim_the_same_stage(tmp_path) -> None
 
     assert [item.stage for item in _due(first, key, OWNER, 48)] == [STAGE_48H]
     assert _due(stale, key, OWNER, 48) == ()
-    assert dict(stale.get(key).prompt_timestamps) == {STAGE_48H: DEPARTURE - 48 * HOUR}
+    assert dict(stale.get(key).request_timestamps) == {
+        STAGE_48H: DEPARTURE - 48 * HOUR
+    }
 
 
 def test_an_earlier_schedule_correction_shortens_expiry_without_losing_legs(tmp_path) -> None:
     ledger = _ledger(tmp_path)
     key = itinerary_key("FAKE90")
     now = DEPARTURE - 60 * HOUR
-    ledger.prompts_due(
+    ledger.requests_due(
         itinerary_key=key,
         traveler_key=OWNER,
         first_departure_epoch=DEPARTURE,
@@ -290,7 +321,7 @@ def test_an_earlier_schedule_correction_shortens_expiry_without_losing_legs(tmp_
         now_epoch=now,
         leg_key="first-leg",
     )
-    ledger.prompts_due(
+    ledger.requests_due(
         itinerary_key=key,
         traveler_key=OWNER,
         first_departure_epoch=DEPARTURE + 4 * HOUR,
@@ -315,7 +346,7 @@ def test_an_earlier_schedule_correction_shortens_expiry_without_losing_legs(tmp_
     assert state.expires_at_epoch == corrected_by_decision
 
     corrected_final = DEPARTURE + 6 * HOUR
-    ledger.prompts_due(
+    ledger.requests_due(
         itinerary_key=key,
         traveler_key=OWNER,
         first_departure_epoch=DEPARTURE + 3 * HOUR,
@@ -350,7 +381,7 @@ def test_invalid_arguments_are_rejected(tmp_path) -> None:
     key = itinerary_key("FAKE95")
 
     with pytest.raises(ValueError):
-        ledger.prompts_due(
+        ledger.requests_due(
             itinerary_key=key,
             traveler_key=OWNER,
             first_departure_epoch=DEPARTURE,
@@ -365,7 +396,7 @@ def test_invalid_arguments_are_rejected(tmp_path) -> None:
             final_arrival_epoch=ARRIVAL,
         )
     with pytest.raises(ValueError):
-        ledger.prompts_due(
+        ledger.requests_due(
             itinerary_key=key,
             traveler_key=OWNER,
             first_departure_epoch=float("inf"),

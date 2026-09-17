@@ -1,12 +1,12 @@
 """Durable, transport-neutral consent policy for a complete itinerary.
 
 The ledger deliberately knows nothing about message transports or vendor feeds.
-A caller supplies schedule times and the current time, and receives prompt work
+A caller supplies schedule times and the current time, and receives consent requests
 or a delivery classification in return.
 
 Who counts as the owner is configuration, not code: pass ``owner_key`` when
-constructing the ledger. The owner gets an early T-48 prompt; everyone else is
-prompted once at T-24.
+constructing the ledger. The owner gets an early T-48 request; everyone else gets
+one request at T-24.
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ STAGE_48H = "t48"
 STAGE_24H = "t24"
 
 _DECISIONS = (OPT_IN, OPT_OUT)
+_LEGACY_REQUESTS_KEY = "prompts"
 _MAX_KEY_CHARS = 160
 _MAX_TRAVELER_CHARS = 64
 _MAX_LEG_KEY_CHARS = 96
@@ -59,7 +60,7 @@ def itinerary_key(
 
 
 @dataclass(frozen=True)
-class ConsentPrompt:
+class ConsentRequest:
     itinerary_key: str
     traveler_key: str
     stage: str
@@ -75,7 +76,7 @@ class ItineraryConsent:
     first_departure_epoch: Optional[float]
     final_arrival_epoch: float
     expires_at_epoch: float
-    prompt_timestamps: Tuple[Tuple[str, float], ...]
+    request_timestamps: Tuple[Tuple[str, float], ...]
 
 
 @dataclass(frozen=True)
@@ -94,7 +95,13 @@ class DeliveryAccess:
 
 
 class ConsentLedger:
-    """Atomically persisted itinerary consent and prompt scheduling state."""
+    """Read and atomically persist consent and itinerary metadata on local disk.
+
+    The JSON file at ``path`` stores the traveler key; itinerary key, including
+    its confirmation code when one is used; opt-in or opt-out decision and its
+    timestamp; leg schedule and expiry timestamps; and consent-request stage
+    timestamps. This ledger sends none of that data to a service.
+    """
 
     def __init__(self, path: str, owner_key: str = "") -> None:
         self._path = path
@@ -105,7 +112,7 @@ class ConsentLedger:
     def owner_key(self) -> str:
         return self._owner_key
 
-    def prompts_due(
+    def requests_due(
         self,
         *,
         itinerary_key: str,
@@ -115,12 +122,12 @@ class ConsentLedger:
         now_epoch: float,
         expires_at_epoch: Optional[float] = None,
         leg_key: Optional[str] = None,
-    ) -> Tuple[ConsentPrompt, ...]:
-        """Claim and return prompt stages due at ``now_epoch``.
+    ) -> Tuple[ConsentRequest, ...]:
+        """Claim and return request stages due at ``now_epoch``.
 
         Claiming stores each returned stage's timestamp before returning, making
         repeated scheduler runs idempotent. The T-48 stage is superseded once
-        the T-24 window begins, so a late first run never emits two prompts
+        the T-24 window begins, so a late first run never emits two requests
         together. Calls upsert one leg's schedule; supply ``leg_key`` when a
         reschedule may change that leg's departure time.
         """
@@ -154,13 +161,13 @@ class ConsentLedger:
             decision_is_active = (
                 entry.get("decision") in _DECISIONS and now < effective_expiry
             )
-            prompts = entry["prompts"]
+            requests = entry["requests"]
             due = []
             remaining = itinerary_departure - now
             if not decision_is_active and 0 < remaining <= 24 * 3600:
-                if STAGE_24H not in prompts:
+                if STAGE_24H not in requests:
                     due.append(
-                        ConsentPrompt(
+                        ConsentRequest(
                             key, traveler, STAGE_24H, itinerary_departure - 24 * 3600
                         )
                     )
@@ -169,16 +176,16 @@ class ConsentLedger:
                 and self._owner_key
                 and traveler == self._owner_key
                 and 24 * 3600 < remaining <= 48 * 3600
-                and STAGE_48H not in prompts
+                and STAGE_48H not in requests
             ):
                 due.append(
-                    ConsentPrompt(
+                    ConsentRequest(
                         key, traveler, STAGE_48H, itinerary_departure - 48 * 3600
                     )
                 )
 
-            for prompt in due:
-                prompts[prompt.stage] = now
+            for request in due:
+                requests[request.stage] = now
                 changed = True
             if changed:
                 self._write()
@@ -210,7 +217,7 @@ class ConsentLedger:
                     "explicit_expiry_epoch": explicit_expiry,
                     "decision": None,
                     "decided_at_epoch": None,
-                    "prompts": {},
+                    "requests": {},
                     "legs": {},
                 }
                 self._entries[key] = entry
@@ -300,7 +307,7 @@ class ConsentLedger:
                 "explicit_expiry_epoch": explicit_expiry,
                 "decision": None,
                 "decided_at_epoch": None,
-                "prompts": {},
+                "requests": {},
                 "legs": {
                     leg_key: {"departure_epoch": departure, "arrival_epoch": arrival}
                 },
@@ -368,6 +375,7 @@ class ConsentLedger:
         return entries
 
     def _write(self) -> None:
+        """Write consent and itinerary metadata to the configured local path."""
         directory = os.path.dirname(os.path.abspath(self._path))
         os.makedirs(directory, exist_ok=True)
         descriptor, temporary_path = tempfile.mkstemp(
@@ -469,7 +477,7 @@ def _state(key: str, entry: dict) -> ItineraryConsent:
         first_departure_epoch=entry.get("first_departure_epoch"),
         final_arrival_epoch=entry["final_arrival_epoch"],
         expires_at_epoch=_effective_expiry(entry),
-        prompt_timestamps=tuple(sorted(entry["prompts"].items())),
+        request_timestamps=tuple(sorted(entry["requests"].items())),
     )
 
 
@@ -496,15 +504,18 @@ def _valid_entry(key: object, value: object) -> Optional[dict]:
         decided = _optional_epoch(value.get("decided_at_epoch"), "decided_at_epoch")
         if (decision is None) != (decided is None):
             return None
-        prompts_value = value.get("prompts", {})
-        if not isinstance(prompts_value, dict) or set(prompts_value) - {
+        requests_value = value.get("requests")
+        if requests_value is None:
+            # Accept the pre-rename key so existing consent ledgers migrate on write.
+            requests_value = value.get(_LEGACY_REQUESTS_KEY, {})
+        if not isinstance(requests_value, dict) or set(requests_value) - {
             STAGE_48H,
             STAGE_24H,
         }:
             return None
-        prompts = {
-            stage: _epoch(timestamp, "prompt timestamp")
-            for stage, timestamp in prompts_value.items()
+        requests = {
+            stage: _epoch(timestamp, "request timestamp")
+            for stage, timestamp in requests_value.items()
         }
         legs_value = value.get("legs", {})
         if not isinstance(legs_value, dict) or len(legs_value) > _MAX_LEGS:
@@ -536,6 +547,6 @@ def _valid_entry(key: object, value: object) -> Optional[dict]:
         "explicit_expiry_epoch": explicit,
         "decision": decision,
         "decided_at_epoch": decided,
-        "prompts": prompts,
+        "requests": requests,
         "legs": legs,
     }

@@ -283,6 +283,26 @@ def test_ntfy_request_keeps_body_priority_base_url_and_rfc2047_title() -> None:
     assert request.get_header("Title").startswith("=?utf-8?")
 
 
+def test_ntfy_request_sends_only_alert_text_and_title_as_user_content() -> None:
+    opener = _RecordingOpener()
+    alert = "AA4912 is delayed."
+    title = "AA4912 update"
+    poster = NtfyPoster(
+        "invented-topic",
+        base_url="https://ntfy.example.com",
+        title=title,
+        opener=opener,
+    )
+
+    assert poster.post(alert)
+    request = opener.calls[0][0]
+
+    assert request.data == alert.encode("utf-8")
+    assert request.get_header("Title") == title
+    assert request.get_header("Tags") is None
+    assert request.get_header("Authorization") is None
+
+
 def test_the_router_resolves_each_recipient_to_its_own_channel() -> None:
     runner = _RecordingRunner()
     route = poster_router(CONFIG, runner=runner)

@@ -58,7 +58,14 @@ def urllib_opener(request: Request, timeout: float) -> int:
 
 
 class NtfyPoster:
-    """Post messages to one ntfy topic with bounded, injected transport."""
+    """Send alert text and its title to one configured external ntfy topic.
+
+    The request body contains only the alert text; the title is one header. No
+    conversation context or arbitrary configuration value is added as message
+    content. Protocol metadata is limited to the configured topic, priority,
+    optional tags, and content type. The only credential this adapter can send
+    is the documented bearer token from ``CLAWFLIGHT_NTFY_TOKEN``.
+    """
 
     def __init__(
         self,
@@ -88,7 +95,12 @@ class NtfyPoster:
         self._opener = opener or urllib_opener
 
     def request_for(self, text: str, priority: NotificationPriority = "info") -> Request:
-        """Build the exact UTF-8 ntfy publish request for one message."""
+        """Build the ntfy request containing only alert text and its title.
+
+        No conversation context is read. Configuration supplies only the topic,
+        title, priority, optional tags, and content type, not extra body data;
+        the optional documented bearer token is the only credential attached.
+        """
         headers = {
             "Content-Type": "text/plain; charset=utf-8",
             "Priority": "4" if priority == "critical" else "3",
@@ -103,6 +115,12 @@ class NtfyPoster:
         return Request(self.url, data=text.encode("utf-8"), headers=headers, method="POST")
 
     def post(self, text: str, priority: NotificationPriority = "info") -> bool:
+        """Send the alert text and title, and no other user data, to ntfy.
+
+        The configured topic receives no conversation context or arbitrary
+        configuration values as message content and no credential except the
+        documented bearer token.
+        """
         try:
             status = self._opener(self.request_for(text, priority), self.timeout)
         except Exception:  # opener failures are durable-outbox failures

@@ -1,9 +1,12 @@
 """Durable itinerary registry: merge, attribute, and group bookings.
 
-The registry is the single writer of ``registry.json``. It merges evidence from
-every ingestion source, attributes each flight through an injected
+The registry reads and writes the local ``registry.json``. Email-ingested and
+calendar-ingested records can contain traveler names and keys, source message
+identifiers, note excerpts, confirmation codes, seats, flight numbers, travel
+dates, airports, and scheduled times. It merges evidence from every ingestion
+source, attributes each flight through an injected
 :class:`~clawflight.people.PersonTable`, and groups same-day alternatives as
-backup bookings instead of deduplicating them away.
+backup bookings instead of deduplicating them away. It sends none of this data.
 """
 from __future__ import annotations
 
@@ -61,6 +64,15 @@ def extract_service_date(update) -> Optional[str]:
 
 
 class Registry:
+    """Persist itinerary and traveler metadata in the local registry JSON file.
+
+    ``path`` is normally ``registry.json``. Email-ingested records stored there
+    include the traveler name and key, confirmation code, flight, route,
+    schedule, source-message identity, status, and any retained notes. Calendar
+    records can also retain a seat and note excerpt. The registry reads this
+    data back on startup and does not transmit it.
+    """
+
     def __init__(self, path: str, people: Optional[PersonTable] = None) -> None:
         self._path = path
         self._lock_path = path + ".lock"
@@ -192,7 +204,11 @@ class Registry:
     def merge_email_candidates(
         self, candidates: "Iterable[EmailItineraryCandidate]"
     ) -> dict:
-        """Merge bounded itinerary evidence produced by trusted email ingestion."""
+        """Store email-ingested itinerary and traveler metadata in registry.json.
+
+        Stored fields include traveler identity, confirmation code, flight
+        number, travel date, route, scheduled times, and source-message identity.
+        """
         parsed = [
             ParsedFlight(
                 leg=FlightLeg(

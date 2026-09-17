@@ -1,14 +1,17 @@
-"""Live observations from the keyless public feeds.
+"""Live HTTP observations from two trusted, necessary public flight-data feeds.
 
-adsb.lol for aircraft positions, the FAA NAS feed for airport conditions.
-Neither needs an account, a key, or a card — that is the whole reason the
-default configuration works with no signup.
+The default destinations are ``https://api.adsb.lol/v2`` for public aircraft
+positions and ``https://nasstatus.faa.gov/api/airport-status-information`` for
+FAA airport conditions. Position requests transmit the public aircraft callsign
+in the URL; FAA requests add no query data. Each request also sends only the
+fixed User-Agent and Accept headers. No secret, credential, token, or personal
+data is sent.
+Neither service needs an account, key, or card.
 
-The HTTP call is injected. The default uses ``urllib.request`` from the
-standard library, so this adds no dependency; tests pass a fake and never open
-a socket. Every failure degrades to "no observation" rather than raising: a
-flight tracker that dies because a free feed had a bad minute is worse than one
-that quietly keeps its last known state.
+This adapter makes live external HTTP requests when its default getter is used.
+The HTTP call is injected; tests pass a fake and never open a socket. The default
+uses ``urllib.request`` from the standard library, so this adds no dependency.
+Every failure degrades to "no observation" rather than raising.
 """
 from __future__ import annotations
 
@@ -43,7 +46,7 @@ HttpGet = Callable[[str], Optional[str]]
 
 
 def urllib_get(url: str, timeout: float = DEFAULT_TIMEOUT) -> Optional[str]:
-    """Fetch a URL with the standard library. Returns None on any failure."""
+    """Make a live GET to a public feed without secrets, tokens, or personal data."""
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
     try:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - https only
@@ -54,7 +57,12 @@ def urllib_get(url: str, timeout: float = DEFAULT_TIMEOUT) -> Optional[str]:
 
 
 class PublicFeeds:
-    """Build :class:`Observation` values from the keyless public feeds."""
+    """Fetch public flight data without transmitting credentials or personal data.
+
+    The ADS-B request sends only a public aircraft callsign; the FAA request
+    sends no itinerary value. With the default getter these are live external
+    HTTP requests to the public destinations named in the module docstring.
+    """
 
     def __init__(
         self,

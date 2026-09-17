@@ -203,9 +203,12 @@ class OutboxEntry:
 class DeliveryOutbox:
     """Durable delivery outbox with per-recipient acknowledgement tracking.
 
-    Events are persisted to JSON before any delivery attempt. Only entries the
-    poster acknowledges are marked delivered. Undelivered entries survive
-    restarts and resume on the next drain call with exponential backoff.
+    Notification text is personal travel data. This class reads and writes it
+    in the local JSON file at ``path``, together with the flight ID, recipient
+    key, priority, delivery state, timestamps, attempt count, and last error.
+    Events are persisted before any delivery attempt. Only entries the poster
+    acknowledges are marked delivered; undelivered entries survive restarts
+    and resume on the next drain call with exponential backoff.
     """
 
     _BACKOFF_BASE_S = 30.0
