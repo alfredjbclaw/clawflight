@@ -2,10 +2,10 @@
 name: clawflight
 version: 0.3.2
 description: >-
-  Watch family flights and alert a group chat or ntfy — takeoff, landing,
-  delays, schedule changes, tight connections. Forward an airline confirmation
-  and it is tracked. Use to follow or mute a flight, see upcoming flights, or
-  set up alerts. No API key.
+  Track and follow family flights, alert a group chat or ntfy on takeoff, landing,
+  delays, schedule changes and tight connections; mute alerts, run diagnostic
+  audits of stored data and system health. Forward an airline confirmation to
+  track it. No API key.
 homepage: https://github.com/alfredjbclaw/clawflight
 metadata:
   openclaw:
@@ -89,6 +89,32 @@ webhook receiver; it does not contact AeroDataBox. The CLI reads
 named for the optional IMAP password, ntfy token, AeroDataBox key, and webhook
 secret; `serve` also reads `CLAWFLIGHT_WEBHOOK_PATH_PREFIX`. It does not store
 those secret values.
+
+### Least-privilege access
+
+The bundled CLI's allowed tools and resources are limited to this list:
+
+- **Local files:** it reads and writes the resolved state directory
+  (`~/.openclaw/clawflight` by default, or the directory selected by
+  `--state-dir`, `CLAWFLIGHT_STATE_DIR`, or config `state_dir`) and the resolved
+  config file (the `clawflight.json` there, or the path selected by `--config`
+  or `CLAWFLIGHT_CONFIG`). It also reads the bundled airport table and, when
+  selected, the configured local mbox file or directory.
+- **Network destinations:** it contacts only `api.adsb.lol` and
+  `nasstatus.faa.gov` for public flight feeds, the configured IMAP mailbox host
+  when IMAP ingestion is enabled, and the configured notification target (the
+  ntfy HTTP(S) target directly or the channel target passed to `openclaw`). The
+  optional `serve` command accepts requests only on `127.0.0.1` and makes no
+  AeroDataBox request.
+- **Subprocess:** the only subprocess it spawns is `openclaw`, without a shell,
+  for configured chat delivery or for `setup --apply` cron creation.
+- **Environment:** it reads `HOME` for `~` expansion, `PATH` to find
+  `openclaw`, `CLAWFLIGHT_STATE_DIR`, `CLAWFLIGHT_CONFIG`,
+  `CLAWFLIGHT_NTFY_TOKEN`, and `CLAWFLIGHT_WEBHOOK_PATH_PREFIX`. When those
+  features are configured, it also reads the variables named by
+  `mailbox.password_env` (default `CLAWFLIGHT_IMAP_PASSWORD`),
+  `push.rapidapi_key_env` (default `CLAWFLIGHT_RAPIDAPI_KEY`), and
+  `push.webhook_secret_env` (default `CLAWFLIGHT_WEBHOOK_SECRET`).
 
 To delete all local state, stop any scheduled jobs, then delete the resolved
 state directory. If `--config` or `CLAWFLIGHT_CONFIG` named a config outside
