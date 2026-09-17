@@ -1,6 +1,6 @@
 ---
 name: clawflight
-version: 0.3.2
+version: 0.3.3
 description: >-
   Track and follow family flights, alert a group chat or ntfy on takeoff, landing,
   delays, schedule changes and tight connections; mute alerts, run diagnostic

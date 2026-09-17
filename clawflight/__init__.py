@@ -9,6 +9,6 @@ carries credentials. Secrets are always referenced by environment-variable
 name via :mod:`clawflight.config`.
 """
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 __all__ = ["__version__"]
